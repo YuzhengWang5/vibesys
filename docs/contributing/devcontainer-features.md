@@ -29,7 +29,7 @@ mechanism never imports an owner; owners import the mechanism.
 
 | Feature | Owner | Folder | Installs |
 | --- | --- | --- | --- |
-| `vibesys-agent` | `vs_agent` | `vs_agent/images/features/` | Node, the four provider CLIs, uv, VibeSys's Python with `mcp`, the non-root `agent` user (uid 1000), `/workspace`; versions from `provider_policy` |
+| `vibesys-agent` | `vs_agent` | `vs_agent/images/features/` | Node, the five provider CLIs including Copilot, uv, VibeSys's Python with `mcp`, the non-root `agent` user (uid 1000), `/workspace`; versions from `provider_policy` |
 | `vibesys-rust` | `vs_sandbox` toolchain catalog | `vs_sandbox/features/` | rustup and the pinned Rust toolchain in `/opt/rustup` and `/opt/cargo`, plus `PATH` for plain and login shells |
 | `vibesys-go` | `vs_sandbox` toolchain catalog | `vs_sandbox/features/` | The pinned Go toolchain in `/usr/local/go` |
 | `vibesys-container-runtime` | `vs_sandbox` toolchain catalog | `vs_sandbox/features/` | A static Docker engine, the compose plugin, kind, kubectl, and the `docker` group, for container-topology tasks |

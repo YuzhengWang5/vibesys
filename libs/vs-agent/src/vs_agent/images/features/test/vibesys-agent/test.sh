@@ -7,6 +7,7 @@ check "claude runs" claude --version
 check "codex runs" codex --version
 check "gemini runs" gemini --version
 check "opencode runs" opencode --version
+check "copilot runs" copilot --version
 check "agent user has uid 1000" bash -c '[ "$(id -u agent)" = 1000 ]'
 check "agent group exists" getent group agent
 check "VibeSys python imports mcp" /opt/vibesys-python/bin/python -c 'import mcp'

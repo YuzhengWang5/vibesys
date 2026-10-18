@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The VibeSys agent layer as a Dev Container Feature: Node from the nodejs.org tarball, the four provider CLIs,
+# The VibeSys agent layer as a Dev Container Feature: Node from the nodejs.org tarball, the provider CLIs,
 # uv, VibeSys's uv-managed Python with `mcp`, and the non-root `agent` user.
 # Self-contained: installs every package it uses and depends on no other Feature.
 set -euo pipefail
@@ -56,6 +56,7 @@ require_option claude_version "${CLAUDE_VERSION:-}"
 require_option codex_version "${CODEX_VERSION:-}"
 require_option gemini_version "${GEMINI_VERSION:-}"
 require_option opencode_version "${OPENCODE_VERSION:-}"
+require_option copilot_version "${COPILOT_VERSION:-}"
 require_option python_version "${PYTHON_VERSION:-}"
 require_option python_home "${PYTHON_HOME:-}"
 
@@ -85,7 +86,8 @@ npm_install_global \
     "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
     "@openai/codex@${CODEX_VERSION}" \
     "@google/gemini-cli@${GEMINI_VERSION}" \
-    "opencode-ai@${OPENCODE_VERSION}"
+    "opencode-ai@${OPENCODE_VERSION}" \
+    "@github/copilot@${COPILOT_VERSION}"
 
 PIP_BREAK_SYSTEM_PACKAGES=1 pip_install uv
 

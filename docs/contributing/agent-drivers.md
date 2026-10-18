@@ -109,6 +109,12 @@ by a fresh one.
 
 ## Vetted harnesses
 
+This experiment branch additionally ships Copilot CLI 1.0.98. Its model catalog
+is not populated by agentshim 0.18.3, so a terminal run must name its model and
+use `--allow-unvetted-model`. This is explicit opt-in, not a fallback to another
+provider. The pinned experiment dependency adds Copilot's `--reasoning-effort`
+translation; `[thinking].level = "high"` therefore reaches the CLI.
+
 `vs_agent.provider_policy.harnesses()` is the one list of the provider and
 model pairs VibeSys runs agents with. It is derived at call time: for each
 shipped provider, the models agentshim's `ProviderProfile.models` lists, the

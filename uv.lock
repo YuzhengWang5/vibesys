@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -41,10 +41,28 @@ members = [
 [[package]]
 name = "agentshim"
 version = "0.18.3"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0b/98/8ca8765ee43b935192b9daac7c0196217b9ad6ad4c347cf8e7bb6a2e7412/agentshim-0.18.3.tar.gz", hash = "sha256:32b3f7e8a5e04e8ac3e94b0e6c2dbaa672c1b8a24ee19473d73ba45375225f43", size = 263970, upload-time = "2026-10-17T02:00:17.312Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/35/9d/bd118e876f4a472546d1a60d73b481bcf060737a20e0fde6113dcf3368f1/agentshim-0.18.3-py3-none-any.whl", hash = "sha256:af03760ab75ad88fbdfd3ec2104acaed2bffe002eabd7ab34fbcd1d8d4bf14cf", size = 307308, upload-time = "2026-10-17T02:00:15.164Z" },
+source = { directory = "../../agentshim" }
+
+[package.metadata]
+requires-dist = [
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2" },
+]
+provides-extras = ["test"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "hypothesis", specifier = ">=6.168.1" },
+    { name = "import-linter", specifier = ">=2.0" },
+    { name = "pyright", specifier = ">=1.1.408" },
+    { name = "pytest", specifier = ">=8.0.0" },
+    { name = "ruff", specifier = "==0.15.12" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2" },
+]
+docs = [
+    { name = "mkdocs", specifier = ">=1.6.1" },
+    { name = "mkdocs-material", specifier = ">=9.6.0" },
+    { name = "mkdocstrings", extras = ["python"], specifier = ">=0.28.0" },
 ]
 
 [[package]]
@@ -2572,8 +2590,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
-    { name = "jeepney", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "cryptography" },
+    { name = "jeepney" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [
@@ -2884,8 +2902,8 @@ name = "uvicorn"
 version = "0.44.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "click", marker = "sys_platform != 'emscripten'" },
-    { name = "h11", marker = "sys_platform != 'emscripten'" },
+    { name = "click" },
+    { name = "h11" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/5e/da/6eee1ff8b6cbeed47eeb5229749168e81eb4b7b999a1a15a7176e51410c9/uvicorn-0.44.0.tar.gz", hash = "sha256:6c942071b68f07e178264b9152f1f16dfac5da85880c4ce06366a96d70d4f31e", size = 86947, upload-time = "2026-04-06T09:23:22.826Z" }
 wheels = [
@@ -2941,7 +2959,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.18.3,<0.19" },
+    { name = "agentshim", directory = "../../agentshim" },
     { name = "cbor2", specifier = "<6" },
     { name = "cryptography", specifier = "<50" },
     { name = "huggingface-hub" },
@@ -3001,7 +3019,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.18.3,<0.19" },
+    { name = "agentshim", directory = "../../agentshim" },
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-faults", editable = "libs/vs-faults" },

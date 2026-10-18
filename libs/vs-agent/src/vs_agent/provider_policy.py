@@ -24,11 +24,11 @@ from dataclasses import dataclass
 
 from vs_agent import provider_profiles
 
-SHIPPED_PROVIDERS: tuple[str, ...] = ("claude", "codex", "gemini", "opencode")
+SHIPPED_PROVIDERS: tuple[str, ...] = ("claude", "codex", "gemini", "opencode", "copilot")
 """The CLI providers VibeSys ships.
 
-agentshim also registers ``copilot``, which VibeSys has neither host-resource
-declarations nor a container install recipe for, so it is not offered here.
+Provider state resources come from agentshim profiles; every shipped provider
+also has a pinned container CLI below.
 """
 
 DEFAULT_CLI_PROVIDER = "codex"
@@ -196,6 +196,7 @@ CLI_VERSIONS: dict[str, str] = {
     "codex": CODEX_DOCKER_CLI_VERSION,
     "gemini": "0.59.0",
     "opencode": "1.18.30",
+    "copilot": "1.0.98",
 }
 """Container CLI version per shipped provider (``npm view <pkg> version`` at
 the time each was pinned, except Codex).

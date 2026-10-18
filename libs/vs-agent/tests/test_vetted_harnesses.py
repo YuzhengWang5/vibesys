@@ -65,6 +65,20 @@ def test_the_opt_out_and_the_stub_backend_run_any_model(provider: str, model: st
     assert AgentSpec(backend=AgentBackend.STUB, provider=provider, model=model).model == model
 
 
+def test_copilot_explicit_model_and_reasoning_are_preserved_with_opt_out() -> None:
+    spec = AgentSpec(
+        provider="copilot",
+        model="gpt-5.6-luna",
+        reasoning_effort="high",
+        allow_unvetted_model=True,
+    )
+    assert (spec.provider, spec.model, spec.reasoning_effort) == (
+        "copilot",
+        "gpt-5.6-luna",
+        "high",
+    )
+
+
 def test_a_swapped_in_model_is_checked_again() -> None:
     spec = AgentSpec(provider="claude", model="claude-opus-5")
     with pytest.raises(UnvettedHarnessError):
@@ -108,9 +122,9 @@ def test_the_vetted_pairs_are_agentshims_models_of_each_shipped_provider(
 def test_a_provider_vibesys_does_not_ship_has_no_vetted_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install(monkeypatch, {"copilot": ("some-model",)})
-    assert vetted_models("copilot") == ()
-    assert default_model("copilot") is None
+    _install(monkeypatch, {"unshipped": ("some-model",)})
+    assert vetted_models("unshipped") == ()
+    assert default_model("unshipped") is None
 
 
 @pytest.mark.parametrize("provider", SHIPPED_PROVIDERS)

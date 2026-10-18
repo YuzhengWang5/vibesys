@@ -7,11 +7,11 @@ import pytest
 
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent import host_resource_declarations
-from vs_agent.api import declare_provider_state_resources
+from vs_agent.api import SHIPPED_PROVIDERS, declare_provider_state_resources
 from vs_agent.api.testing import fake_profiles
 from vs_sandbox.api import HostResource, HostResourceAccess
 
-_SHIPPED = ("claude", "codex", "gemini", "opencode")
+_SHIPPED = SHIPPED_PROVIDERS
 
 # Stand-in profiles for the tests whose subject is VibeSys's declaration table
 # rather than any CLI's declared state layout. agentshim registers real
