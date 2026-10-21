@@ -5,8 +5,8 @@ SOURCE="$1"
 EXP="$2"
 MODE="$3"
 [[ "$MODE" =~ ^(ar|eagle3|optimize)$ ]]
-GPU="${CUDA_VISIBLE_DEVICES:?gpuctl lease required}"
-SETUP="$EXP/runs/20261020_152200_setup"
+GPU="${CUDA_VISIBLE_DEVICES:?an explicit GPU allocation is required}"
+SETUP="$EXP/runs/${SCENARIO_SETUP_RUN:-20261020_152200_setup}"
 SHIM="/mnt_ssd/data1/wyz/projects/kb/src/agentshim"
 MODEL="/mnt_ssd/data1/models/Qwen3-32B"
 DRAFT="/mnt_ssd/data1/models/Qwen3-32B_eagle3"
@@ -85,7 +85,7 @@ cat > "$RUN/README.md" <<EOF
 # Scenario C / $MODE
 
 - 目的：A100 迁移复现；本 run 与其他方向无共享候选、状态、会话或日志。
-- CUDA_VISIBLE_DEVICES=$GPU；设备 UUID=$UUID；由 gpuctl 全程持有租约。
+- CUDA_VISIBLE_DEVICES=$GPU；设备 UUID=$UUID；分配方式=${SCENARIO_GPU_CONTROL:-gpuctl}。
 - 源码：$SOURCE；branch=$(git -C "$SOURCE" branch --show-current)。
 - tested_commit=$ENGINE_COMMIT；agentshim=$SHIM_COMMIT。
 - candidate=$CANDIDATE；initial_commit=$CANDIDATE_COMMIT。
@@ -118,7 +118,7 @@ nvidia-smi -i "$GPU" -q > "$RUN/logs/gpu-before.txt"
 vibesys validate "$CANDIDATE" --task default
 if [[ "$MODE" == optimize ]]; then
     vibesys --headless --outer-loop plain --project "$CANDIDATE" --task default \
-        --config "$RUN/scripts/agent.toml" --agent-backend cli --cli-provider copilot \
+        --config "$RUN/scripts/copilot-sol.toml" --agent-backend cli --cli-provider copilot \
         --model gpt-5.6-sol --allow-unvetted-model --backend cuda \
         --max-rounds 15 --tracker-backend local --run-id "$VS_RUN_ID" &
     CHILD=$!

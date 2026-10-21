@@ -6,11 +6,17 @@
 实验目录位于 `projects/kb/exps/<timestamp>_scenario-c-sol-{1,2,3}`，
 与 `src/worktrees/scenario-c-sol-{1,2,3}` 一一对应。
 
-`launch.sh SOURCE EXP` 必须通过 `gpuctl` 为整个 pipeline 获取一张 GPU。
+`launch.sh SOURCE EXP [SETUP_RUN]` 默认通过 `gpuctl` 为整个 pipeline 获取一张 GPU。
 同一方向依次测量 vLLM AR、EAGLE3，并运行 issue-tracker (`plain`) 外循环
 15 轮，所有角色均为 Copilot CLI / `gpt-5.6-sol` / high。
 不得绕过租约直接调用 `stage.sh`。三个方向可并行调用 `launch.sh`。
 租约丢失或停止时仅清理带本次 run-id 的容器，不影响别人的任务。
+
+用户在诊断后允许不用 gpuctl。此时必须显式调用
+`launch.sh SOURCE EXP SETUP_RUN GPU_INDEX`，三个方向给出不同的空卡，
+每阶段仍检查显存与利用率并显式导出 `CUDA_VISIBLE_DEVICES`。这种模式不持有
+全局租约，不能保证其他用户稍后不会启动同卡任务，记录为 `manual`。
+`prepare.sh SOURCE EXP SETUP_RUN` 可为重试创建新的准备 run，不能覆盖旧 run。
 
 基线固定为 vLLM 0.32.0 的不可变镜像，bf16、memory utilization 0.95、
 max-model-len 4096；EAGLE3 使用 7 个 speculative tokens。

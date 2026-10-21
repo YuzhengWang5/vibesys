@@ -3,7 +3,8 @@ set -euo pipefail
 
 SOURCE="$(realpath "$1")"
 EXP="$(realpath "$2")"
-SETUP="$EXP/runs/20261020_152200_setup"
+SETUP_ID="${3:-20261020_152200_setup}"
+SETUP="$EXP/runs/$SETUP_ID"
 SEED="/mnt_ssd/data1/wyz/projects/kb/exps/20261018_115909_scenario-c/runs/20261018_120300_setup/candidate"
 SEED_COMMIT="cfcdc802dd2de09afa6c2011821e577c3879e9cc"
 REFERENCE="/mnt_ssd/data1/wyz/projects/kb/exps/20261018_115909_scenario-c/runs/20261018_120300_setup/candidate/.venv/lib/python3.12/site-packages/transformers/models/qwen3/modeling_qwen3.py"
@@ -12,6 +13,8 @@ export PATH="$SOURCE/.venv/bin:/home/yuzhengw/.local/bin:$PATH"
 test ! -e "$SETUP/READY"
 test ! -e "$SETUP/candidate"
 test -z "$(git -C "$SOURCE" status --porcelain)"
+test -f "$SOURCE/support/scenario-c-repro/copilot-sol.toml"
+mkdir -p "$SETUP/scripts" "$SETUP/logs" "$SETUP/plots"
 cp "$SOURCE/support/scenario-c-repro/"* "$SETUP/scripts/"
 mkdir "$SETUP/candidate"
 git -C "$SEED" archive "$SEED_COMMIT" | tar -x -C "$SETUP/candidate"
@@ -33,11 +36,21 @@ cp /home/yuzhengw/.copilot/config.json "$SETUP/logs/auth-home/.copilot/config.js
 chmod 600 "$SETUP/logs/auth-home/.copilot/config.json"
 uv sync --project "$SETUP/candidate" --frozen --quiet
 vibesys validate "$SETUP/candidate" --task default > "$SETUP/logs/validate.log" 2>&1
+python - "$SETUP/scripts/copilot-sol.toml" <<'PY'
+import sys
+from pathlib import Path
+
+from vibesys.api import agent_spec_from_config, load_config
+
+spec = agent_spec_from_config(load_config(Path(sys.argv[1])), allow_unvetted_model=True)
+assert (spec.provider, spec.model, spec.reasoning_effort) == ("copilot", "gpt-5.6-sol", "high")
+PY
 ENGINE_COMMIT="$(git -C "$SOURCE" rev-parse HEAD)"
 SHIM_COMMIT="$(git -C /mnt_ssd/data1/wyz/projects/kb/src/agentshim rev-parse HEAD)"
 CANDIDATE_COMMIT="$(git -C "$SETUP/candidate" rev-parse HEAD)"
 sha256sum "$SETUP/scripts/"* > "$SETUP/logs/scripts.sha256"
-cat > "$EXP/README.md" <<EOF
+if [[ ! -f "$EXP/README.md" ]]; then
+    cat > "$EXP/README.md" <<EOF
 # Scenario C / $(basename "$SOURCE")
 
 目标：独立进行 15 轮 Copilot CLI / gpt-5.6-sol / high 优化，并独立测量
@@ -56,7 +69,9 @@ vLLM AR、EAGLE3 基线。硬件为 A100-SXM4-80GB，不是论文 H100。
 - 每次尝试独立新建 runs/<timestamp>_<mode>，设备、commit、脚本摘要记录在其中。
 - 不自动提交或 push exps；结果以各 run 的原始日志和 summary 为准。
 EOF
-cat > "$EXP/CODE_PIN.md" <<EOF
+fi
+if [[ ! -f "$EXP/CODE_PIN.md" ]]; then
+    cat > "$EXP/CODE_PIN.md" <<EOF
 # 执行代码索引
 
 三个方向仅共享框架与公开输入，候选 Git 历史彼此独立。
@@ -64,8 +79,10 @@ cat > "$EXP/CODE_PIN.md" <<EOF
 
 | run | mode | vibesys tested_commit | agentshim tested_commit | candidate initial_commit |
 | --- | --- | --- | --- | --- |
-| 20261020_152200_setup | CPU setup | $ENGINE_COMMIT | $SHIM_COMMIT | $CANDIDATE_COMMIT |
 EOF
+fi
+printf '| %s | CPU setup | %s | %s | %s |\n' "$SETUP_ID" "$ENGINE_COMMIT" \
+    "$SHIM_COMMIT" "$CANDIDATE_COMMIT" >> "$EXP/CODE_PIN.md"
 cat > "$SETUP/README.md" <<EOF
 # 环境准备
 

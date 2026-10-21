@@ -1,0 +1,16 @@
+[model]
+name = "gpt-5.6-sol"
+
+[thinking]
+level = "high"
+
+[agent]
+backend = "cli"
+cli_provider = "copilot"
+cli_timeout = 3600
+
+[agent.quota]
+policy = "pause"
+
+[backend]
+name = "cuda"

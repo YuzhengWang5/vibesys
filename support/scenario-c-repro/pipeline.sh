@@ -3,8 +3,8 @@ set -euo pipefail
 
 SOURCE="$1"
 EXP="$2"
-SETUP="$EXP/runs/20261020_152200_setup"
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:?gpuctl must allocate a GPU}"
+SETUP="$EXP/runs/${SCENARIO_SETUP_RUN:-20261020_152200_setup}"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:?an explicit GPU allocation is required}"
 if [[ ! "$CUDA_VISIBLE_DEVICES" =~ ^[0-7]$ ]]; then
     echo "Expected exactly one physical GPU, got: $CUDA_VISIBLE_DEVICES" >&2
     exit 2
