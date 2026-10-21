@@ -854,7 +854,7 @@ def test_docker_environment_opens_one_started_sandbox_with_agent_paths(
     assert session.view.profile_execution == "local"
     assert session.view.paths.accuracy_command == "uv run python accuracy_checker/checker.py"
     assert session.view.paths.benchmark_command == "uv run python benchmark/benchmark.py"
-    assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/workspace/.cache/uv"
+    assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/home/agent/.cache/uv"
     assert backend.calls[0][1]["lifecycle_hooks"] == []
     # The container always starts from a resolved agent image, built from the
     # backend's own base image, even when the run needs no evaluator tools.
@@ -1794,7 +1794,7 @@ def test_modal_environment_installs_nothing_at_container_start(tmp_path: Path) -
     _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
 
     assert "extra_init_commands" not in backend.calls[0][1]
-    assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/workspace/.cache/uv"
+    assert backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"] == "/home/agent/.cache/uv"
 
 
 def test_modal_environment_mounts_modal_auth_under_the_agent_home(
@@ -2021,14 +2021,15 @@ def test_modal_environment_runtime_notes_describe_profile_contract(tmp_path: Pat
     assert "from torch.autograd import DeviceType" not in notes
 
 
-def test_modal_environment_prompt_notes_reuse_workspace_uv_cache(tmp_path: Path) -> None:
+def test_modal_environment_prompt_notes_keep_uv_cache_outside_workspace(tmp_path: Path) -> None:
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
     _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="codex"))
     notes = _modal_runtime_document(tmp_path)
 
-    assert "UV_CACHE_DIR=/workspace/.cache/uv" in notes
+    assert "UV_CACHE_DIR" in notes
+    assert "outside the workspace" in notes
     assert "persist outside Git checkpoints" in notes
     assert "do not delete or recreate `.venv`" in notes
     assert ".venv/bin/python -m ..." in notes
@@ -2365,6 +2366,10 @@ remote_artifact_root = "/remote/vibesys"
     # (a) One sandbox kind across all three environments.
     for env_name, backend in backends.items():
         assert backend.calls[0][0] is SandboxKind.DOCKER, env_name
+        cache = Path(backend.calls[0][1]["extra_env"]["UV_CACHE_DIR"])
+        assert cache.is_absolute(), env_name
+        assert not cache.is_relative_to("/workspace"), env_name
+        assert not cache.is_relative_to(tmp_path), env_name
 
     # (b) The common mount set declared by `_container_mount_plan` — the
     # objective doc, the evaluator package, and the CLI auth/framework
