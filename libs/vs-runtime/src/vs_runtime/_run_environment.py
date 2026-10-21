@@ -151,6 +151,8 @@ from vs_sandbox.api.symlink_mounts import (
 from vs_sim.api import DISCARD, CloseOnce, ReleaseStack
 
 _RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
+_CONTAINER_UV_CACHE_DIR = "/home/agent/.cache/uv"
+"""Keep uv's nested Git markers outside every host-inspected candidate tree."""
 _RUNTIME_DOCUMENT_NAME = "runtime-environment.md"
 """The runtime resource declaration's ``agent_path`` for the effective objective.
 
@@ -1011,7 +1013,7 @@ class DockerEnvironment(NoCaptureRecovery):
         if resolved_cli is not None:
             provider, cli_provider_env = resolved_cli
             auth_files = auth_copy_paths(provider)
-        cli_provider_env.setdefault("UV_CACHE_DIR", f"{workspace_root}/.cache/uv")
+        cli_provider_env.setdefault("UV_CACHE_DIR", _CONTAINER_UV_CACHE_DIR)
         # The agent image's baked toolchain root is read-only (the vibesys-rust
         # Feature chmods /opt/cargo a+rX, deliberately: an agent cannot apt/cargo
         # install mid-round). A Cargo invocation that needs a crate the image
@@ -1283,7 +1285,7 @@ class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
 
             resources, docker_symlinks = _container_mount_plan(request)
             cli_provider_env, auth_files = _cli_provider_env_and_auth_files(request)
-            cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
+            cli_provider_env.setdefault("UV_CACHE_DIR", _CONTAINER_UV_CACHE_DIR)
             helper_source = evaluator_helpers.SKYPILOT_EVALUATOR_HELPER
             helper_path = "/opt/vibesys-skypilot-evaluator.py"
             socket_path = "/opt/vibesys-skypilot/bridge.sock"
@@ -1457,7 +1459,7 @@ class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
 
         resources, docker_symlinks = _container_mount_plan(request)
         cli_provider_env, auth_files = _cli_provider_env_and_auth_files(request)
-        cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
+        cli_provider_env.setdefault("UV_CACHE_DIR", _CONTAINER_UV_CACHE_DIR)
         if request.git_history_root is not None:
             cli_provider_env.setdefault("VIBESYS_GIT_HISTORY", "/opt/vibesys-history")
         cli_provider_env["VIBESYS_MODAL_APP_NAME"] = app_name
