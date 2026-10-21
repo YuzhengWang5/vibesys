@@ -67,10 +67,16 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 test -z "$(git -C "$SOURCE" status --porcelain)"
 test -z "$(git -C "$SHIM" status --porcelain)"
-read -r MEMORY UTIL UUID < <(
-    nvidia-smi -i "$GPU" --query-gpu=memory.used,utilization.gpu,uuid \
-        --format=csv,noheader,nounits | tr -d ','
-)
+for (( attempt=0; attempt<30; attempt++ )); do
+    read -r MEMORY UTIL UUID < <(
+        nvidia-smi -i "$GPU" --query-gpu=memory.used,utilization.gpu,uuid \
+            --format=csv,noheader,nounits | tr -d ','
+    )
+    if (( MEMORY <= 100 && UTIL == 0 )); then
+        break
+    fi
+    sleep 1
+done
 if (( MEMORY > 100 || UTIL > 0 )); then
     echo "GPU $GPU busy outside this run: $MEMORY MiB, utilization=$UTIL; refusing." >&2
     exit 1
@@ -96,6 +102,7 @@ cat > "$RUN/README.md" <<EOF
 - 请求：50，warmup=3，seed=42，Python3，temperature=0，max_tokens=512。
 - 权重：/mnt_ssd/data1/models；精确 revisions 见 logs/pins.json。
 - 正确性门禁沿用原始 evaluator；echo/improved 另报，不声称完整语义正确。
+- vLLM 基线从 benchmark 输出计算同样的 gold-similarity 门槛；不向原 checker 传不支持的 model 参数。
 - 实验状态：运行中；结束后见 summary.md 和 logs/exit-code.txt。
 EOF
 python - "$RUN/logs/pins.json" "$ENGINE_COMMIT" "$SHIM_COMMIT" "$CANDIDATE_COMMIT" <<'PY'
@@ -155,17 +162,10 @@ else
         exit 1
     fi
     uv run --project "$CANDIDATE" --frozen python \
-        "$CANDIDATE/.vibesys/tasks/default/accuracy_checker/checker.py" \
-        --url "$URL" --model qwen3-32b --tokenizer-path "$MODEL" --seed 42 \
-        > "$RUN/logs/accuracy.log" 2>&1 &
-    CHILD=$!
-    wait "$CHILD"
-    CHILD=""
-    uv run --project "$CANDIDATE" --frozen python \
         "$CANDIDATE/.vibesys/tasks/default/benchmark/benchmark.py" \
         --url "$URL" --model qwen3-32b --tokenizer-path "$MODEL" \
         --num-samples 50 --warmup 3 --max-tokens 512 --seed 42 \
-        --output-json "$RUN/logs/benchmark.json" &
+        --print-stream --output-json "$RUN/logs/benchmark.json" &
     CHILD=$!
     wait "$CHILD"
     CHILD=""
@@ -173,6 +173,7 @@ else
 import json
 import math
 import sys
+from pathlib import Path
 
 with open(sys.argv[1]) as file:
     data = json.load(file)
@@ -181,6 +182,21 @@ assert data["num_steady"] == 47, data
 assert data["num_failed"] == 0, data
 assert data["num_completed"] == 47, data
 assert math.isfinite(data["median_tok_per_sec"]) and data["median_tok_per_sec"] > 0, data
+samples = data["per_sample"]
+assert len(samples) == 47
+gold_rate = sum(sample["quality"]["ratio_to_gold"] >= 0.5 for sample in samples) / len(samples)
+quality = {
+    "source": "benchmark steady samples; original checker does not accept --model",
+    "num_samples": len(samples),
+    "min_gold_similarity": 0.5,
+    "min_gold_rate": 0.5,
+    "gold_rate": gold_rate,
+    "passed": gold_rate >= 0.5,
+    "num_echo_input_verbatim": data["num_echo_input_verbatim"],
+    "num_improved_over_input": data["num_improved_over_input"],
+}
+Path(sys.argv[1]).with_name("quality-gate.json").write_text(json.dumps(quality, indent=2) + "\n")
+assert quality["passed"], quality
 print("完整基线测量 median_tok_per_sec =", data["median_tok_per_sec"])
 print("echo =", data["num_echo_input_verbatim"], "improved =", data["num_improved_over_input"])
 PY

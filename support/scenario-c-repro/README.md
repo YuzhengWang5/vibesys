@@ -23,6 +23,10 @@ max-model-len 4096；EAGLE3 使用 7 个 speculative tokens。
 每种基线独立发送 seed 42 的 50 个请求，前 3 个 warmup 不计入主指标。
 沿用 example 的 `median_tok_per_sec` 原始公式与宽松正确性门禁，同时保留
 逐请求输出、echo-input 和 improved-over-input 统计，不将该门禁当作完整语义验证。
+原 checker 不接受 vLLM 必需的 `--model` 参数，因此 vLLM 基线直接运行公开
+benchmark CLI，再对其 steady 样本的 `ratio_to_gold` 应用相同的 0.50/0.50
+门槛，另存 `quality-gate.json`。VibeSys 候选仍运行原 checker，不修改门禁。
+`--print-stream` 保留原始输出文本；GPU 阶段切换最多等待 30 秒清理尾部利用率。
 
 权重位于 `/mnt_ssd/data1/models/{Qwen3-32B,Qwen3-32B_eagle3}`，
 是固定 Hugging Face snapshot 的已解引用硬链接目录，因此容器的只读
