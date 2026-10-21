@@ -35,6 +35,10 @@ benchmark CLI，再对其 steady 样本的 `ratio_to_gold` 应用相同的 0.50/
 `logs/pins.json`；实验控制脚本先 checkpoint，再原样复制到该 run。
 重试必须新建 run，不覆盖失败记录。不提交或 push `exps/`。
 
+容器的 uv cache 位于 `/home/agent/.cache/uv`，在候选工作树之外且不在方向间共享。
+uv 会生成空 `.git` 标记；将 cache 放在 workspace 下会触发 host Git 的嵌套仓库
+保护，在 implementer 返回后中止运行。保持该保护不变，不删除标记来绕过它。
+
 已确认的复现差异：论文使用 H100 和 Codex CLI，本实验使用 A100 80GB
 和 Copilot CLI；论文未给出确切的 Scenario C vLLM 版本，不能把迁移实验的
 绝对吞吐或加速比直接称作论文数值复现。
