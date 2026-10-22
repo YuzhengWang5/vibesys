@@ -18,7 +18,13 @@ typed tool-exclusion contract 实施，不向候选提供其他方向的历史�
 
 `launch.sh SOURCE EXP [SETUP_RUN]` 默认通过 `gpuctl` 为整个 pipeline 获取一张 GPU。
 同一方向依次测量 vLLM AR、EAGLE3，并运行 issue-tracker (`plain`) 外循环
-15 轮，所有角色均为 Copilot CLI / `gpt-5.6-sol` / high。
+最多 15 次性能分析，所有角色均为 Copilot CLI / high。
+模型以该方向 checkpoint 中的 `copilot-sol.toml` 为唯一来源，默认
+`gpt-5.6-sol`；prepare 校验该配置，stage 从复制到本 run 的同一配置读取模型，
+用于 CLI 参数及所有元数据。新模型先做隔离的实际调用探测，
+再在新 worktree 中修改配置并 checkpoint，不能热改正在运行的方向。
+新一批独立复现必须走默认公开未实现 seed，不设置 continuation/pilot 变量；
+每份独立重测 AR/EAGLE3，不沿用其他方向的测量或已学习候选。
 不得绕过租约直接调用 `stage.sh`。三个方向可并行调用 `launch.sh`。
 租约丢失或停止时仅清理带本次 run-id 的容器，不影响别人的任务。
 

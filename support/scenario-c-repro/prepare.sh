@@ -82,15 +82,17 @@ cp /home/yuzhengw/.copilot/config.json "$SETUP/logs/auth-home/.copilot/config.js
 chmod 600 "$SETUP/logs/auth-home/.copilot/config.json"
 uv sync --project "$SETUP/candidate" --frozen --quiet
 vibesys validate "$SETUP/candidate" --task default > "$SETUP/logs/validate.log" 2>&1
-python - "$SETUP/scripts/copilot-sol.toml" <<'PY'
+AGENT_MODEL="$(python - "$SETUP/scripts/copilot-sol.toml" <<'PY'
 import sys
 from pathlib import Path
 
 from vibesys.api import agent_spec_from_config, load_config
 
 spec = agent_spec_from_config(load_config(Path(sys.argv[1])), allow_unvetted_model=True)
-assert (spec.provider, spec.model, spec.reasoning_effort) == ("copilot", "gpt-5.6-sol", "high")
+assert (spec.provider, spec.reasoning_effort) == ("copilot", "high"), spec
+print(spec.model)
 PY
+)"
 ENGINE_COMMIT="$(git -C "$SOURCE" rev-parse HEAD)"
 SHIM_COMMIT="$(git -C /mnt_ssd/data1/wyz/projects/kb/src/agentshim rev-parse HEAD)"
 CANDIDATE_COMMIT="$(git -C "$SETUP/candidate" rev-parse HEAD)"
@@ -99,7 +101,7 @@ if [[ ! -f "$EXP/README.md" ]]; then
     cat > "$EXP/README.md" <<EOF
 # Scenario C / $(basename "$SOURCE")
 
-目标：独立进行 15 轮 Copilot CLI / gpt-5.6-sol / high 优化，并独立测量
+目标：独立进行最多 15 次性能分析的 Copilot CLI / $AGENT_MODEL / high 优化，并独立测量
 vLLM AR、EAGLE3 基线。硬件为 A100-SXM4-80GB，不是论文 H100。
 
 - 源码 worktree：$SOURCE。
@@ -138,7 +140,7 @@ cat > "$SETUP/README.md" <<EOF
 - tested_commit=$ENGINE_COMMIT；agentshim=$SHIM_COMMIT。
 - candidate initial_commit=$CANDIDATE_COMMIT。
 - seed_kind=$SEED_KIND；seed_repository=$SEED；seed_commit=$SEED_COMMIT。
-- 模型：Copilot gpt-5.6-sol，high；目标权重位于 /mnt_ssd/data1/models。
+- 模型：Copilot $AGENT_MODEL，high；目标权重位于 /mnt_ssd/data1/models。
 - setup 仅为 CPU 准备，不产生性能数据。GPU 任务必须经 gpuctl 启动。
 EOF
 printf '# 准备结果\n\n输入校验通过；尚未进行 GPU 性能测量。\n\n建议：保留公共输入 pin 和控制脚本。\n' > "$SETUP/summary.md"

@@ -67,6 +67,17 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 test -z "$(git -C "$SOURCE" status --porcelain)"
 test -z "$(git -C "$SHIM" status --porcelain)"
+AGENT_MODEL="$(python - "$RUN/scripts/copilot-sol.toml" <<'PY'
+import sys
+from pathlib import Path
+
+from vibesys.api import agent_spec_from_config, load_config
+
+spec = agent_spec_from_config(load_config(Path(sys.argv[1])), allow_unvetted_model=True)
+assert (spec.provider, spec.reasoning_effort) == ("copilot", "high"), spec
+print(spec.model)
+PY
+)"
 for (( attempt=0; attempt<30; attempt++ )); do
     read -r MEMORY UTIL UUID < <(
         nvidia-smi -i "$GPU" --query-gpu=memory.used,utilization.gpu,uuid \
@@ -95,7 +106,7 @@ cat > "$RUN/README.md" <<EOF
 - 源码：$SOURCE；branch=$(git -C "$SOURCE" branch --show-current)。
 - tested_commit=$ENGINE_COMMIT；agentshim=$SHIM_COMMIT。
 - candidate=$CANDIDATE；initial_commit=$CANDIDATE_COMMIT。
-- agent=Copilot CLI；model=gpt-5.6-sol；reasoning=high；独立 HOME=$HOME。
+- agent=Copilot CLI；model=$AGENT_MODEL；reasoning=high；独立 HOME=$HOME。
 - optimize：issue-tracker plain / local，max-rounds=15，无跨实验 issue store。
 - baseline：vLLM 0.32.0；$IMAGE。
 - 单 GPU bf16；memory-utilization=0.95；max-model-len=4096；EAGLE3 K=7。
@@ -116,7 +127,7 @@ performance-evaluator 工作流后，由公开 RunHandle.stop() 自动安全停�
 未达到该条件不能把命令退出或本地自测当作打通。
 EOF
 fi
-python - "$RUN/logs/pins.json" "$ENGINE_COMMIT" "$SHIM_COMMIT" "$CANDIDATE_COMMIT" <<'PY'
+python - "$RUN/logs/pins.json" "$ENGINE_COMMIT" "$SHIM_COMMIT" "$CANDIDATE_COMMIT" "$AGENT_MODEL" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -126,7 +137,7 @@ Path(sys.argv[1]).write_text(json.dumps({
     "model": "Qwen/Qwen3-32B@9216db5781bf21249d130ec9da846c4624c16137",
     "draft_model": "AngelSlim/Qwen3-32B_eagle3@74789e1a6a4b705a71d040315d911b58fb2a80ef",
     "dataset": "m-a-p/CodeEditorBench@9bd3f75915e7583feae1d0e98c09176c20a6bd1d",
-    "agent_provider": "copilot", "agent_model": "gpt-5.6-sol",
+    "agent_provider": "copilot", "agent_model": sys.argv[5],
 }, indent=2) + "\n")
 PY
 sha256sum "$RUN/scripts/"* > "$RUN/logs/scripts.sha256"
@@ -145,7 +156,7 @@ if [[ "$MODE" == pilot ]]; then
 elif [[ "$MODE" == optimize ]]; then
     vibesys --headless --outer-loop plain --project "$CANDIDATE" --task default \
         --config "$RUN/scripts/copilot-sol.toml" --agent-backend cli --cli-provider copilot \
-        --model gpt-5.6-sol --allow-unvetted-model --backend cuda \
+        --model "$AGENT_MODEL" --allow-unvetted-model --backend cuda \
         --max-rounds 15 --tracker-backend local --run-id "$VS_RUN_ID" &
     CHILD=$!
     wait "$CHILD"
