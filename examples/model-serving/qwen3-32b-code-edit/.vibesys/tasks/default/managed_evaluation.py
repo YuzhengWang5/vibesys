@@ -122,11 +122,7 @@ def _evaluate(
     cancellation: Cancellation,
     cleanup: ExitStack,
 ) -> int:
-    # lint-waiver: LW-031900 [S603]; The trusted task supplies an argv vector. A shell
-    # > wrapper would weaken quoting; this script runs only in candidate isolation.
-    evaluator = subprocess.Popen(  # noqa: S603
-        command, stdin=subprocess.DEVNULL, start_new_session=True
-    )
+    evaluator = subprocess.Popen(command, stdin=subprocess.DEVNULL, start_new_session=True)
     cleanup.callback(_stop, evaluator)
     while True:
         cancellation.check()
@@ -165,9 +161,7 @@ def run_evaluation(
         cleanup.callback(_write_service_log, log)
         service_command = ["bash", str(launcher), "--model-dir", "/model", "--port", str(port)]
         _LOG.info("starting candidate service: %s", service_command)
-        # lint-waiver: LW-031901 [S603]; Executing the candidate's fixed startup entry
-        # > is intentional. Shell-free argv preserves quoting and container confinement.
-        service = subprocess.Popen(  # noqa: S603
+        service = subprocess.Popen(
             service_command,
             stdin=subprocess.DEVNULL,
             stdout=log,

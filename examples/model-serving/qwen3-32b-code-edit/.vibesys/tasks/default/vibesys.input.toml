@@ -5,12 +5,12 @@ backends = ["cuda"]
 domain = "llm-serving"
 
 [accuracy]
-command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/checker.py"]
-timeout_seconds = 120
+command = ["python", "${PROJECT_ROOT}/.vibesys/tasks/default/managed_evaluation.py", "--", "uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/checker.py", "--tokenizer-path", "/model", "--seed", "42"]
+timeout_seconds = 1800
 
 [benchmark]
-command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/benchmark.py"]
-timeout_seconds = 300
+command = ["python", "${PROJECT_ROOT}/.vibesys/tasks/default/managed_evaluation.py", "--", "uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/benchmark.py", "--tokenizer-path", "/model", "--seed", "42", "--num-samples", "50", "--warmup", "3", "--max-tokens", "512"]
+timeout_seconds = 4500
 
 [benchmark.result]
 json_argument = "--output-json"
