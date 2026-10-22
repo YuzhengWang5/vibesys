@@ -115,6 +115,15 @@ use `--allow-unvetted-model`. This is explicit opt-in, not a fallback to another
 provider. The pinned experiment dependency adds Copilot's `--reasoning-effort`
 translation; `[thinking].level = "high"` therefore reaches the CLI.
 
+Every Copilot turn excludes `session_store_sql`, `store_memory`, and
+`vote_memory` through agentshim's typed tool-exclusion contract, including
+resumed turns and every role. Separate HOME directories do not isolate
+shared-account cloud history. This launch policy prevents the normal tool
+interface from reading or writing that context; it is not an adversarial
+network boundary. Local session `sql` remains available. The experiment's
+agentshim checkpoint must support this contract; unsupported exclusions fail
+before launching rather than falling back to unrestricted tools.
+
 `vs_agent.provider_policy.harnesses()` is the one list of the provider and
 model pairs VibeSys runs agents with. It is derived at call time: for each
 shipped provider, the models agentshim's `ProviderProfile.models` lists, the
