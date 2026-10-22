@@ -76,7 +76,7 @@ A long-lived process lets a turn receive a message while it runs
 (`Session.steer`) and report rate-limit windows as they change, and it keeps the
 model's context between turns without a resume.
 
-The container process is started by agentshim through
+Every container process, including a one-shot CLI, is started by agentshim through
 `vs_agent.docker_confinement.DockerContainerConfinement`, an
 `agentshim.Confinement` over the run's `DockerSandbox`:
 
@@ -90,6 +90,14 @@ The container process is started by agentshim through
 
 agentshim maps the working directory, MCP server paths and the schema directory
 into the container itself, so a confined session passes host paths through.
+
+After a failed one-shot turn, VibeSys reaps the marked processes before reporting
+the failure or allowing another turn. Terminating the host `docker exec` client
+alone does not terminate the agent or its tools inside the container. This also
+prevents a timed-out CLI from overlapping a resumed call and retaining GPU memory.
+If reaping fails, the launched session stays closed and the cleanup error is
+reported; the next turn cannot silently start beside the old process.
+Successful turns and long-lived stream conversations are not reaped this way.
 
 ### Startup recovery
 
