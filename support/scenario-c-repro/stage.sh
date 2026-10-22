@@ -4,7 +4,7 @@ set -euo pipefail
 SOURCE="$1"
 EXP="$2"
 MODE="$3"
-[[ "$MODE" =~ ^(ar|eagle3|optimize)$ ]]
+[[ "$MODE" =~ ^(ar|eagle3|optimize|pilot)$ ]]
 GPU="${CUDA_VISIBLE_DEVICES:?an explicit GPU allocation is required}"
 SETUP="$EXP/runs/${SCENARIO_SETUP_RUN:-20261020_152200_setup}"
 SHIM="/mnt_ssd/data1/wyz/projects/kb/src/agentshim"
@@ -105,6 +105,17 @@ cat > "$RUN/README.md" <<EOF
 - vLLM 基线从 benchmark 输出计算同样的 gold-similarity 门槛；不向原 checker 传不支持的 model 参数。
 - 实验状态：运行中；结束后见 summary.md 和 logs/exit-code.txt。
 EOF
+if [[ "$MODE" == pilot ]]; then
+    cat >> "$RUN/README.md" <<EOF
+
+本 run 仅验证首轮流程，不是新的三份独立完整搜索。
+使用本方向自己的首个已实现候选；来源见 setup README。正常预算最多两轮、
+每轮一个 issue、每个 issue 最多一次尝试、整场最多 5400 秒。
+正式 accuracy 和 benchmark 通过、首个 issue 通过 judge 并进入下一
+performance-evaluator 工作流后，由公开 RunHandle.stop() 自动安全停止。
+未达到该条件不能把命令退出或本地自测当作打通。
+EOF
+fi
 python - "$RUN/logs/pins.json" "$ENGINE_COMMIT" "$SHIM_COMMIT" "$CANDIDATE_COMMIT" <<'PY'
 import json
 import sys
@@ -123,7 +134,15 @@ printf '| %s | %s | %s | %s | %s |\n' "$RUN_ID" "$MODE" "$ENGINE_COMMIT" \
     "$SHIM_COMMIT" "$CANDIDATE_COMMIT" >> "$EXP/CODE_PIN.md"
 nvidia-smi -i "$GPU" -q > "$RUN/logs/gpu-before.txt"
 vibesys validate "$CANDIDATE" --task default
-if [[ "$MODE" == optimize ]]; then
+if [[ "$MODE" == pilot ]]; then
+    python "$RUN/scripts/scenario_c_pilot.py" \
+        --project "$CANDIDATE" --run-id "$VS_RUN_ID" \
+        --config "$RUN/scripts/copilot-sol.toml" \
+        --status-file "$RUN/logs/pilot-status.json" &
+    CHILD=$!
+    wait "$CHILD"
+    CHILD=""
+elif [[ "$MODE" == optimize ]]; then
     vibesys --headless --outer-loop plain --project "$CANDIDATE" --task default \
         --config "$RUN/scripts/copilot-sol.toml" --agent-backend cli --cli-provider copilot \
         --model gpt-5.6-sol --allow-unvetted-model --backend cuda \
