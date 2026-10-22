@@ -38,9 +38,11 @@ Two traps:
 | Run environment choice and evaluator dispatch | `vs_runtime` |
 
 agentshim is a transport. VibeSys wraps each provider argv before launch:
-`confine_to_sandbox` in `libs/vs-agent/src/vs_agent/session_launch.py`
-rewrites every command through the confinement's `wrap`, on the host or in a
-container alike. The provider CLIs run with approvals and their own sandboxes
+host confinement uses `confine_to_sandbox` in
+`libs/vs-agent/src/vs_agent/session_launch.py`; every container transport uses
+`DockerContainerConfinement`, which marks its processes so failed one-shot turns
+can reap them before retrying. Both rewrite commands through the confinement's
+`wrap`. The provider CLIs run with approvals and their own sandboxes
 off (`--dangerously-bypass-approvals-and-sandbox`,
 `--dangerously-skip-permissions`), so VibeSys confinement is the only boundary.
 Never rely on a provider flag for isolation. See

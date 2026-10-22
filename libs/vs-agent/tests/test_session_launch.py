@@ -747,7 +747,8 @@ def test_a_container_turn_carries_the_sandbox_environment_and_workdir(
     assert argv[:3] == ["docker", "exec", "-i"]
     assert argv[argv.index("-w") + 1] == "/workspace"
     forwarded = [argv[index + 1] for index, item in enumerate(argv) if item == "-e"]
-    assert "VIBESYS_ROUND=3" in forwarded
+    assert "VIBESYS_ROUND" in forwarded
+    assert fake.requests[-1].env["VIBESYS_ROUND"] == "3"
     assert sandbox.container_id in argv
     assert argv[argv.index(sandbox.container_id) + 1].endswith(
         agentshim.get_provider(provider).profile.binary
@@ -853,7 +854,9 @@ def test_a_container_timeout_reports_no_docker_transport_in_its_message(
     def run(request: agentshim.CommandRequest) -> FakeRun:
         # Every container command is scripted, the binary health check
         # included; only the turn itself is the one that hangs.
-        return FakeRun() if "--help" in request.argv else FakeRun(timeout=True)
+        if "--help" in request.argv or list(request.argv[-3:-1]) == ["sh", "-c"]:
+            return FakeRun()
+        return FakeRun(timeout=True)
 
     sandbox = FakeDockerConfinement(
         workspace=tmp_path, extra_env={"ANTHROPIC_AUTH_TOKEN": "secret"}

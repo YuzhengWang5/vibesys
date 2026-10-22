@@ -282,7 +282,7 @@ class _Launch:
     config_scope: agentshim.ConfigScope
     transport: agentshim.TransportKind
     confinement: agentshim.Confinement | None = None
-    """Set for a long-lived transport in a container: agentshim confines, maps and reaps.
+    """Set for a container: agentshim confines and maps every transport.
 
     ``executor`` is then the plain executor and ``env`` is unused (the
     confinement supplies the environment). Without it the executor is already
@@ -472,10 +472,9 @@ class ConfinedSessionLauncher:
         sandbox, find_binary, host_env = self._sandbox_for(spec, config_scope)
         transport = self._transport_for(spec)
 
-        if transport is agentshim.TransportKind.STREAM and in_container:
-            # agentshim confines the long-lived process itself, so it can mark
-            # it for `reap` and map the working directory, MCP commands and
-            # schema directory the way the container sees them.
+        if in_container:
+            # A stopped docker client does not stop its container processes.
+            # Mark one-shot agents too, so a failed turn can reap them.
             confinement = DockerContainerConfinement(
                 self._docker_sandbox_for(spec), runner=self._executor_factory()
             )
@@ -577,6 +576,12 @@ class ConfinedSessionLauncher:
             agent_path=agent_path,
             timeout=self._timeout,
             log=self._log,
+            reap_failed_turn=(
+                launch.confinement.reap
+                if launch.confinement is not None
+                and launch.transport is agentshim.TransportKind.ONE_SHOT
+                else None
+            ),
         )
         self._sessions.add(session)
         return session
