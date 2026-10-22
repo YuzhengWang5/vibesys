@@ -68,7 +68,11 @@ requires a fail verdict.
 
 Start the real service for an end-to-end `/health` and completion-stream smoke test. When the
 benchmark is configured, run a short sanity workload and require positive token throughput
-plus non-null TTFT and TPOT. Require a non-empty streaming delta for every generated model token.
+plus non-null TTFT and TPOT. Follow the input-owned streaming contract and token-counting
+rules. Model tokens can be partial UTF-8 characters; do not require a non-empty Unicode
+delta for each model token when the input permits empty fragment records or buffered text.
+Verify decoded output, EOS/stop behavior, usage, and genuinely incremental streaming.
+Reject fabricated text, token boundaries, or counts, not input-permitted Unicode-safe grouping.
 
 For an unrelated bug, check the board below first and report at most one bug in `new_issues`
 (type `bug`), with `## Background`, `## Acceptance criteria` and `## Notes` in its
