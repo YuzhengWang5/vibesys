@@ -143,6 +143,15 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
     }
 
 
+@pytest.mark.parametrize("role", ["implementer", "single_agent"])
+def test_streaming_contract_defers_to_input_and_handles_utf8(role: str) -> None:
+    context = _NEUTRAL_CONTEXT | {"modality": "text_generation"}
+    rendered = _domain_section(DomainName.LLM_SERVING, role, context)
+    assert "input-owned streaming contract" in rendered
+    assert "UTF-8" in rendered
+    assert "Preserve one logical SSE delta per generated model token" not in rendered
+
+
 @pytest.mark.parametrize("leak_check", DOMAIN_LEAK_CHECKS, ids=lambda check: check.source_domain)
 def test_domain_specific_keywords_do_not_leak_to_vetted_domains(
     leak_check: DomainLeakCheck,
