@@ -2033,7 +2033,7 @@ def test_launcher_and_session_close_are_idempotent(
 
 
 def test_the_shipped_providers_are_the_ones_the_launcher_accepts() -> None:
-    assert subject.supported_providers() == ["claude", "codex", "gemini", "opencode"]
+    assert subject.supported_providers() == ["claude", "codex", "copilot", "gemini", "opencode"]
     for provider in SCRIPTED_PROVIDERS:
         assert provider in subject.supported_providers()
 
