@@ -39,6 +39,34 @@ benchmark CLI，再对其 steady 样本的 `ratio_to_gold` 应用相同的 0.50/
 uv 会生成空 `.git` 标记；将 cache 放在 workspace 下会触发 host Git 的嵌套仓库
 保护，在 implementer 返回后中止运行。保持该保护不变，不删除标记来绕过它。
 
+正式评估通过只读输入中的 `managed_evaluation.py` 管理服务生命周期。
+候选实现项目根目录的 `run_server.sh --model-dir /model --port PORT`，
+以前台方式运行服务，模型就绪后 `/health` 才返回 200。accuracy 和 benchmark
+各自使用新容器；包装器逐次启动指定候选、等待就绪、运行未经修改的原始
+checker/benchmark，并在成功、失败或取消后停止自己的整个进程组。
+服务日志完整写入该评估的 stderr 原始流，不进入 benchmark JSON。
+不使用 host network、不借用 agent 自测服务、不更改正确性门槛。
+每阶段额外预留最多 900 秒启动预算；这不计入请求吞吐指标。
+自测实例必须在提交正式评估前退出，避免单卡同时加载两份 32B 权重。
+新配置通过新的 prepare/run 生效，不覆盖旧实验，也不修改通用 Docker
+运行环境对其他任务的行为。
+
 已确认的复现差异：论文使用 H100 和 Codex CLI，本实验使用 A100 80GB
 和 Copilot CLI；论文未给出确切的 Scenario C vLLM 版本，不能把迁移实验的
 绝对吞吐或加速比直接称作论文数值复现。
+
+### 有界首轮诊断
+
+`prepare.sh` 默认仍从固定的公开未实现 fixture 创建新输入。
+仅诊断修复时，可显式提供 `SCENARIO_PILOT_SEED_RUN` 和
+`SCENARIO_PILOT_SEED_COMMIT`，从当前 exp 自己的旧 optimize run 提取固定候选，
+不读取其他 exp，不复制旧状态、会话或运行进程。来源在 setup README 记录。
+这种 pilot 不是新的独立搜索，也不用于计算三次复现的统计结果。
+
+新 setup 完成后，只在 `gpuctl` 的单 GPU 租约中调用
+`stage.sh SOURCE EXP pilot`，并以 `SCENARIO_SETUP_RUN` 选择该 setup。
+它使用 Copilot CLI / gpt-5.6-sol，最多两轮、每轮一个 issue、每 issue 一次尝试，
+整场 5400 秒。正式 accuracy 与正有限 benchmark 通过并进入下一
+performance-evaluator 工作流后，公开 `RunHandle.stop()` 请求合作停止。
+`logs/pilot-status.json` 区分已验证后主动停止、预算结束、超时和其他失败；
+预算结束或仅有本地自测均不算打通。
