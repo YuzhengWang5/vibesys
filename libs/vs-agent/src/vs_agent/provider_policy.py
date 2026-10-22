@@ -34,6 +34,15 @@ also has a pinned container CLI below.
 DEFAULT_CLI_PROVIDER = "codex"
 """The CLI provider selected when neither a flag nor config names one."""
 
+_CROSS_SESSION_TOOLS: dict[str, tuple[str, ...]] = {
+    "copilot": ("session_store_sql", "store_memory", "vote_memory"),
+}
+
+
+def excluded_session_tools(provider: str) -> tuple[str, ...]:
+    """Keep shared-account history and memory outside VibeSys agent sessions."""
+    return _CROSS_SESSION_TOOLS.get(provider, ())
+
 
 # --- Vetted harnesses --------------------------------------------------------
 

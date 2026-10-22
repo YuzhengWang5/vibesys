@@ -40,30 +40,8 @@ members = [
 
 [[package]]
 name = "agentshim"
-version = "0.18.3"
-source = { directory = "../../agentshim" }
-
-[package.metadata]
-requires-dist = [
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
-    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2" },
-]
-provides-extras = ["test"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "hypothesis", specifier = ">=6.168.1" },
-    { name = "import-linter", specifier = ">=2.0" },
-    { name = "pyright", specifier = ">=1.1.408" },
-    { name = "pytest", specifier = ">=8.0.0" },
-    { name = "ruff", specifier = "==0.15.12" },
-    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2" },
-]
-docs = [
-    { name = "mkdocs", specifier = ">=1.6.1" },
-    { name = "mkdocs-material", specifier = ">=9.6.0" },
-    { name = "mkdocstrings", extras = ["python"], specifier = ">=0.28.0" },
-]
+version = "0.18.4"
+source = { git = "file:///mnt_ssd/data1/wyz/projects/kb/src/agentshim?rev=17e62a2d285af8baf23723a7019521e7dc933d6e#17e62a2d285af8baf23723a7019521e7dc933d6e" }
 
 [[package]]
 name = "aiohappyeyeballs"
@@ -2959,7 +2937,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", directory = "../../agentshim" },
+    { name = "agentshim", git = "file:///mnt_ssd/data1/wyz/projects/kb/src/agentshim?rev=17e62a2d285af8baf23723a7019521e7dc933d6e" },
     { name = "cbor2", specifier = "<6" },
     { name = "cryptography", specifier = "<50" },
     { name = "huggingface-hub" },
@@ -3019,7 +2997,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", directory = "../../agentshim" },
+    { name = "agentshim", git = "file:///mnt_ssd/data1/wyz/projects/kb/src/agentshim?rev=17e62a2d285af8baf23723a7019521e7dc933d6e" },
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-faults", editable = "libs/vs-faults" },

@@ -6,6 +6,16 @@
 实验目录位于 `projects/kb/exps/<timestamp>_scenario-c-sol-{1,2,3}`，
 与 `src/worktrees/scenario-c-sol-{1,2,3}` 一一对应。
 
+所有角色及恢复会话都在 CLI 工具层移除并拒绝 `session_store_sql`、
+`store_memory`、`vote_memory`。独立 HOME 不能隔离同账号的云端会话检索，
+因此不能只靠目录隔离。此约束由 VibeSys 的 launch policy 和 agentshim 的
+typed tool-exclusion contract 实施，不向候选提供其他方向的历史或建议。
+已有 run 不热修改；启用修复后用新源码 checkpoint、新 setup 和新 run，
+每个方向仅继承自身已接纳的候选。旧尝试保留，并如实记录越界检索尝试
+及返回结果；不能将“返回空”当作原先已经存在强制隔离。
+实验分支将 agentshim 固定到本地 Git 的明确 revision，而非可变源码目录，
+避免 uv 复用旧 wheel 后使工具隔离配置与记录的源码 checkpoint 不一致。
+
 `launch.sh SOURCE EXP [SETUP_RUN]` 默认通过 `gpuctl` 为整个 pipeline 获取一张 GPU。
 同一方向依次测量 vLLM AR、EAGLE3，并运行 issue-tracker (`plain`) 外循环
 15 轮，所有角色均为 Copilot CLI / `gpt-5.6-sol` / high。

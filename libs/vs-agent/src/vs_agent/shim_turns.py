@@ -25,6 +25,7 @@ from vs_agent.contracts import (
     AgentTurnTimeoutError,
     SteerOutcome,
 )
+from vs_agent.provider_policy import excluded_session_tools
 from vs_agent.reply_limits import ReplyGuard, reply_breach
 from vs_agent.session_errors import SessionResumeError
 
@@ -388,6 +389,7 @@ def _turn_request(live: LaunchedSession, request: AgentTurnRequest) -> agentshim
         timeout = max(1, int(request.timeout.total_seconds()))
     return agentshim.TurnRequest(
         prompt=f"{request.instructions}\n\n{request.message}{schema_hint}",
+        excluded_tools=excluded_session_tools(live.profile.name),
         timeout=timeout,
         output_schema=schema,
         reasoning_effort=(

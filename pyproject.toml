@@ -17,7 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "agentshim>=0.18.3,<0.19",
+    "agentshim>=0.18.4,<0.19",
     "cbor2<6",
     "cryptography<50",
     "jinja2>=3.1",
@@ -466,7 +466,7 @@ exclude = ["exp_env/**", "sdk/vs-evaluator"]
 members = ["sdk/*", "libs/*"]
 
 [tool.uv.sources]
-agentshim = { path = "../../agentshim" }
+agentshim = { git = "file:///mnt_ssd/data1/wyz/projects/kb/src/agentshim", rev = "17e62a2d285af8baf23723a7019521e7dc933d6e" }
 vs-bench = { workspace = true }
 vs-dst = { workspace = true }
 vs-core = { workspace = true }
