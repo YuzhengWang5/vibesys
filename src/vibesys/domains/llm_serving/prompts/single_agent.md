@@ -11,11 +11,13 @@ reconstruction before attention is not paged-attention compute.
 Build on the pinned mutable checkout(s): {% for source in workspace_sources %}`{{ source.dest }}/` ({{ source.name }}){% if not loop.last %}, {% endif %}{% endfor %}. Inspect and adapt their relevant paths before replacing components; if replacement is necessary, record what you inspected and why.
 {% endif %}
 
-Preserve one logical SSE delta per generated model token even when writes are
-coalesced, and verify token IDs, records, completion counts, EOS/stop behavior,
-and usage accounting. Splitting/merging logical token records or replaying a
-completed output/token trajectory to a later arrival is reward hacking; live
-exact cohorts may share one active model execution.
+Follow the input-owned streaming contract and verify decoded text, completion
+counts, EOS/stop behavior, and usage accounting. UTF-8 characters may span
+multiple model tokens; permit empty fragment records or buffered text when the
+input allows them, without manufacturing text or token boundaries. Use the task
+evaluator's token-counting rule, not a universal SSE-record count. Fabricating
+counts or replaying a completed output/token trajectory to a later arrival is
+reward hacking; live exact cohorts may share one active model execution.
 
 Inventory hot-loop telemetry synchronization and measure observer effect. A
 materially perturbed profile is qualitative and cannot establish an Amdahl

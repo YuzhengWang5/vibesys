@@ -27,8 +27,11 @@ different language/runtime behind this adapter.
 
 For every scoped text endpoint: do not emit EOS text; stop before a matched stop
 string; set `finish_reason` correctly; and count only emitted-text tokens in
-`completion_tokens`. Preserve one logical SSE delta per generated model token
-even if transport writes are coalesced.
+`completion_tokens`. Follow the input-owned streaming contract: UTF-8 characters
+may span multiple model tokens, so empty fragment records or buffered text may
+be necessary. Preserve decoded text and task-required accounting; never invent
+non-empty deltas or split characters to manufacture token records. Task
+evaluators decide whether counts come from token IDs, retokenized text, or records.
 
 The typed plan names the only endpoint surface in scope. Read the narrow
 serving-systems OpenAI API reference when exact request/response/SSE details are
@@ -84,8 +87,11 @@ integration points. Inspect the reference implementation and configuration, impl
 architecture and local weight loading directly, and do not substitute a ready-made model class
 or generic wrapper. Preserve the checker-facing `VibeServeModel.from_pretrained(model_dir,
 device, dtype)` and `generate(input_ids, max_new_tokens=N)` interfaces, `/health`, and
-`/v1/completions`; every generated model token must produce a non-empty streaming delta. Use
-the configured accelerator and dtype, load weights only from `/model`, and do not fetch model
+`/v1/completions`. Follow the input-owned streaming contract and token-counting rules.
+A model token can be only part of a UTF-8 character: empty fragment records or buffered
+Unicode-safe text are valid when that contract permits them. Never invent non-empty text or
+split decoded characters to manufacture token records. Use the configured accelerator and
+dtype, load weights only from `/model`, and do not fetch model
 data from the internet. Make the minimum sufficient change, then run the relevant pytest,
 accuracy, benchmark, and streaming checks. Return exactly one JSON object matching:
 {"reply":{"summary": "...", "files_touched": ["..."], "self_check": "..."}}
