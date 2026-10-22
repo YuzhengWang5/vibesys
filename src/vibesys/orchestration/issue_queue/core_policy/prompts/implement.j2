@@ -22,8 +22,11 @@ integration points. Inspect the reference implementation and configuration, impl
 architecture and local weight loading directly, and do not substitute a ready-made model class
 or generic wrapper. Preserve the checker-facing `VibeServeModel.from_pretrained(model_dir,
 device, dtype)` and `generate(input_ids, max_new_tokens=N)` interfaces, `/health`, and
-`/v1/completions`; every generated model token must produce a non-empty streaming delta. Use
-the configured accelerator and dtype, load weights only from `/model`, and do not fetch model
+`/v1/completions`. Follow the input-owned streaming contract and token-counting rules.
+A model token can be only part of a UTF-8 character: empty fragment records or buffered
+Unicode-safe text are valid when that contract permits them. Never invent non-empty text or
+split decoded characters to manufacture token records. Use the configured accelerator and
+dtype, load weights only from `/model`, and do not fetch model
 data from the internet. Make the minimum sufficient change, then run the relevant pytest,
 accuracy, benchmark, and streaming checks. Return exactly one JSON object matching:
 {% else %}

@@ -18,8 +18,11 @@ different language/runtime behind this adapter.
 
 For every scoped text endpoint: do not emit EOS text; stop before a matched stop
 string; set `finish_reason` correctly; and count only emitted-text tokens in
-`completion_tokens`. Preserve one logical SSE delta per generated model token
-even if transport writes are coalesced.
+`completion_tokens`. Follow the input-owned streaming contract: UTF-8 characters
+may span multiple model tokens, so empty fragment records or buffered text may
+be necessary. Preserve decoded text and task-required accounting; never invent
+non-empty deltas or split characters to manufacture token records. Task
+evaluators decide whether counts come from token IDs, retokenized text, or records.
 
 The typed plan names the only endpoint surface in scope. Read the narrow
 serving-systems OpenAI API reference when exact request/response/SSE details are

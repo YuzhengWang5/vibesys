@@ -169,6 +169,19 @@ def test_no_issue_queue_system_prompt_assumes_a_serving_task(role: AgentRole) ->
     assert not [term for term in _SERVING_ONLY_TERMS if term in role.system_prompt]
 
 
+@pytest.mark.parametrize(
+    "context",
+    [ImplementPrompt(issue=_ISSUE), ReviewPrompt(issue=_ISSUE, summary="Done.")],
+    ids=("implementer", "judge"),
+)
+def test_streaming_contract_defers_to_input_and_handles_utf8(context: PromptContext) -> None:
+    rendered = _render(context, _CONFIGURED)
+    assert "input-owned streaming contract" in rendered
+    assert "UTF-8" in rendered
+    assert "every generated model token must produce a non-empty streaming delta" not in rendered
+    assert "Require a non-empty streaming delta for every generated model token" not in rendered
+
+
 def test_generic_run_prompts_do_not_invent_a_serving_contract() -> None:
     contexts = (
         ImplementPrompt(issue=_ISSUE),

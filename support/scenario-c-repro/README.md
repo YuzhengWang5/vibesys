@@ -74,6 +74,15 @@ checker/benchmark，并在成功、失败或取消后停止自己的整个进程
 和 Copilot CLI；论文未给出确切的 Scenario C vLLM 版本，不能把迁移实验的
 绝对吞吐或加速比直接称作论文数值复现。
 
+流式文本和 token 计数以任务只读输入为准。此示例的原始 benchmark 已明确
+对完整响应重新分词，不用 SSE chunk 数量计算吞吐。通用 implementer/judge
+不得额外要求每个模型 token 都产生非空、有效 Unicode 文本：一个字符可能
+横跨多个 byte-fallback token。允许输入许可的 Unicode 缓冲、空片段或
+speculative chunk 分组，但不允许伪造文本、token 边界或 usage。
+修复只澄清 prompt 和 Objective，不改变 checker、benchmark、质量门槛或
+吞吐公式。受旧矛盾要求影响的尝试保留失败记录，在新的源码 checkpoint、
+setup 和 run 中重开，不热改正在执行的输入，也不抹去已消耗的搜索预算。
+
 ### 有界首轮诊断
 
 `prepare.sh` 默认仍从固定的公开未实现 fixture 创建新输入。

@@ -5,6 +5,7 @@ Maximize **single-batch end-to-end completion throughput** (median completion to
 ## Server contract
 
 - Streaming `POST /v1/completions`. Bench sends `prompt_is_preformatted: True` — tokenize the prompt verbatim, no second chat template pass.
+- SSE text chunks need not correspond one-to-one to model tokens. Buffer partial UTF-8 characters or use empty fragment records without corrupting otherwise-valid Unicode or inventing text to make records non-empty. Speculatively accepted tokens may share a chunk. The unchanged benchmark re-tokenizes the concatenated response for `output_tokens`; SSE chunk count is reported separately, not used as the token count.
 - Accept the predicted-outputs envelope `{"prediction": {"type": "content", "content": "<text>"}}`. Tokenize `prediction.content` once at request-time; it is a draft hint, **not** part of the prompt.
 - Disable thinking mode (`enable_thinking=False`); Qwen3's `<think>...</think>` would blow past `max_tokens`.
 - Capture prefill/decode/verify-extend in CUDA graphs. Default attention: FlashInfer batched wrappers with `use_cuda_graph=True`.
