@@ -9,6 +9,16 @@ SEED="/mnt_ssd/data1/wyz/projects/kb/exps/20261018_115909_scenario-c/runs/202610
 SEED_COMMIT="cfcdc802dd2de09afa6c2011821e577c3879e9cc"
 SEED_KIND="public-unimplemented"
 PILOT=0
+if [[ -n "${SCENARIO_CONTINUE_RUN:-}" && -n "${SCENARIO_PILOT_SEED_RUN:-}" ]]; then
+    echo "choose continuation or pilot seed, not both" >&2
+    exit 1
+fi
+if [[ -n "${SCENARIO_CONTINUE_RUN:-}" ]]; then
+    [[ "$SCENARIO_CONTINUE_RUN" =~ ^[0-9]{8}_[0-9]{6}_(optimize|pilot)$ ]]
+    SEED="$EXP/runs/$SCENARIO_CONTINUE_RUN/candidate"
+    SEED_COMMIT="${SCENARIO_CONTINUE_COMMIT:?continuation requires an exact candidate commit}"
+    SEED_KIND="same-experiment-validated-continuation"
+fi
 if [[ -n "${SCENARIO_PILOT_SEED_RUN:-}" ]]; then
     [[ "$SCENARIO_PILOT_SEED_RUN" =~ ^[0-9]{8}_[0-9]{6}_optimize$ ]]
     SEED="$EXP/runs/$SCENARIO_PILOT_SEED_RUN/candidate"
@@ -18,6 +28,9 @@ if [[ -n "${SCENARIO_PILOT_SEED_RUN:-}" ]]; then
     SEED_KIND="same-experiment-first-candidate-diagnostic"
     PILOT=1
 fi
+[[ "$SEED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+git -C "$SEED" cat-file -e "$SEED_COMMIT^{commit}"
+EXAMPLE="$SOURCE/examples/model-serving/qwen3-32b-code-edit"
 REFERENCE="/mnt_ssd/data1/wyz/projects/kb/exps/20261018_115909_scenario-c/runs/20261018_120300_setup/candidate/.venv/lib/python3.12/site-packages/transformers/models/qwen3/modeling_qwen3.py"
 export CUDA_VISIBLE_DEVICES=""
 export PATH="$SOURCE/.venv/bin:/home/yuzhengw/.local/bin:$PATH"
@@ -33,9 +46,11 @@ git -C "$SEED" archive "$SEED_COMMIT" | tar -x -C "$SETUP/candidate"
 cp "$REFERENCE" "$SETUP/candidate/.vibesys/tasks/default/reference/reference.py"
 cp /mnt_ssd/data1/models/Qwen3-32B/config.json \
     "$SETUP/candidate/.vibesys/tasks/default/reference/config.json"
-cp "$SOURCE/examples/model-serving/qwen3-32b-code-edit/README.md" "$SETUP/candidate/README.md"
-cp "$SOURCE/resources/evaluators/model_serving/managed_evaluation.py" \
+cp "$EXAMPLE/README.md" "$SETUP/candidate/README.md"
+cp "$EXAMPLE/.vibesys/tasks/default/managed_evaluation.py" \
     "$SETUP/candidate/.vibesys/tasks/default/managed_evaluation.py"
+cp "$EXAMPLE/.vibesys/tasks/default/OBJECTIVE.md" \
+    "$SETUP/candidate/.vibesys/tasks/default/OBJECTIVE.md"
 cp "$SETUP/scripts/managed-input.toml" \
     "$SETUP/candidate/.vibesys/tasks/default/vibesys.input.toml"
 python - "$SETUP/candidate/.vibesys/tasks/default/OBJECTIVE.md" "$SETUP/scripts" "$PILOT" <<'PY'

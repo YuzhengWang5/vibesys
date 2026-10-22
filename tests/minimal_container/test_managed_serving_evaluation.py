@@ -17,7 +17,8 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.minimal_container
 
 _ROOT = Path(__file__).resolve().parents[2]
-_WRAPPER = _ROOT / "resources/evaluators/model_serving/managed_evaluation.py"
+_TASK = _ROOT / "examples/model-serving/qwen3-32b-code-edit/.vibesys/tasks/default"
+_WRAPPER = _TASK / "managed_evaluation.py"
 _IMAGE_ENV = "VIBESYS_SERVICE_TEST_IMAGE"
 _SERVER = """\
 import argparse
@@ -198,8 +199,14 @@ def test_cancellation_stops_the_service_and_evaluator(serving_input: Path) -> No
     assert result.returncode == 0, result.stderr
 
 
-def test_managed_input_wraps_both_original_evaluators() -> None:
-    path = _ROOT / "support/scenario-c-repro/managed-input.toml"
+@pytest.mark.parametrize(
+    "path",
+    [
+        _TASK / "vibesys.input.toml",
+        _ROOT / "support/scenario-c-repro/managed-input.toml",
+    ],
+)
+def test_managed_input_wraps_both_original_evaluators(path: Path) -> None:
     config = tomllib.loads(path.read_text())
     for stage, evaluator in (("accuracy", "checker.py"), ("benchmark", "benchmark.py")):
         command = config[stage]["command"]
@@ -210,3 +217,15 @@ def test_managed_input_wraps_both_original_evaluators() -> None:
         ]
         assert any(item.endswith(evaluator) for item in command[3:])
     assert config["benchmark"]["result"]["metric"] == "median_tok_per_sec"
+
+
+def test_reproduction_only_freezes_the_examples_client_environment() -> None:
+    example = tomllib.loads((_TASK / "vibesys.input.toml").read_text())
+    reproduction = tomllib.loads(
+        (_ROOT / "support/scenario-c-repro/managed-input.toml").read_text()
+    )
+    for stage in ("accuracy", "benchmark"):
+        command = reproduction[stage]["command"]
+        assert command.count("--frozen") == 1
+        reproduction[stage]["command"] = [item for item in command if item != "--frozen"]
+    assert reproduction == example

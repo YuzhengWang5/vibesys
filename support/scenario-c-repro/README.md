@@ -50,6 +50,15 @@ checker/benchmark，并在成功、失败或取消后停止自己的整个进程
 自测实例必须在提交正式评估前退出，避免单卡同时加载两份 32B 权重。
 新配置通过新的 prepare/run 生效，不覆盖旧实验，也不修改通用 Docker
 运行环境对其他任务的行为。
+管理器及正式服务契约位于仓库自带的 Qwen3 code-edit 示例中，prepare 直接
+复制该实现与 Objective，不再另维护一份生命周期实现。复现 manifest 仅
+比示例多 `uv run --frozen`，以使用已固定的锁文件，其他命令和预算一致。
+
+继续同方向的已验证候选时，显式提供 `SCENARIO_CONTINUE_RUN` 和
+`SCENARIO_CONTINUE_COMMIT`。prepare 只从当前 exp 内提取对应 Git 快照，
+保留推理实现，采用当前正式示例的 Objective，去掉有界 pilot 的“不做优化”
+限制；不复制旧会话、issue board 或失败评估状态。新 run 使用正常
+15 轮 VibeSys issue-tracker 流程，不重测已经完成的基线，也不读取其他方向。
 
 已确认的复现差异：论文使用 H100 和 Codex CLI，本实验使用 A100 80GB
 和 Copilot CLI；论文未给出确切的 Scenario C vLLM 版本，不能把迁移实验的
