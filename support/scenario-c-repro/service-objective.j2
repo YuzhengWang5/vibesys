@@ -1,24 +1,5 @@
 {{ objective }}
 
-## Official evaluation service lifecycle
-
-Implement a candidate-owned `run_server.sh` at the project root. It must accept
-`--model-dir /model --port PORT`, prepare its dependencies from the committed
-project, and run the candidate service in the foreground until stopped.
-`GET /health` must return HTTP 200 only after the real model is ready to serve.
-Do not daemonize the launcher or depend on a server left by an earlier command.
-
-The framework runs accuracy and benchmark in separate fresh containers at the
-submitted candidate revision. Each configured command invokes a read-only
-`managed_evaluation.py` that starts `run_server.sh`, waits up to 900 seconds for
-readiness, executes the original evaluator, and stops the service and its
-descendants. The checker and benchmark correctness rules are unchanged.
-
-Stop any GPU self-test service before submitting a framework evaluation, so the
-single allocated GPU does not hold two copies of Qwen3-32B. For local use, call
-the configured managed commands too; do not start a second service alongside
-them. A missing launcher, startup failure, or service exit is an evaluation
-failure with the service log retained, not a valid performance measurement.
 {% if pilot %}
 
 ## Bounded first-round lifecycle pilot
