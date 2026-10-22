@@ -186,6 +186,7 @@ class LaunchedSession:
         agent_path: Callable[[str], str],
         timeout: int | None,
         log: Callable[[str], None],
+        reap_failed_turn: Callable[[], None] | None = None,
     ) -> None:
         """Bind a library session to the launch facts its turns need."""
         self.session = session
@@ -196,6 +197,7 @@ class LaunchedSession:
         self.agent_path = agent_path
         self.timeout = timeout
         self.log = log
+        self.reap_failed_turn = reap_failed_turn
         self.closed = False
 
     def close(self) -> None:
@@ -257,10 +259,28 @@ def _run_turn(
         message = "agent session is closed"
         raise RuntimeError(message)
 
-    expected = request.expected_provider_session_id
     events = live.events
     events.observer = observer
     events.begin_turn(structured=request.output_schema is not None, stop=live.session.interrupt)
+    try:
+        return _execute_turn(live, request)
+    except Exception:
+        if live.reap_failed_turn is not None:
+            live.closed = True
+            live.log("ending confined processes after a failed one-shot agent turn")
+            live.reap_failed_turn()
+            live.closed = False
+        raise
+    finally:
+        events.observer = None
+        events.structured = False
+        live.steers.clear()
+
+
+def _execute_turn(live: LaunchedSession, request: AgentTurnRequest) -> AgentTurnResult:
+    """Run and normalize one turn, leaving resource cleanup to its owner."""
+    expected = request.expected_provider_session_id
+    events = live.events
     try:
         if expected is None:
             turn = _run(live, request, expect_conversation=None)
@@ -279,11 +299,6 @@ def _run_turn(
             usage = error.usage if isinstance(error, AgentTurnTimeoutError) else None
             raise AgentOutputSchemaError(events.breach, usage=usage) from error
         raise
-    finally:
-        events.observer = None
-        events.structured = False
-        live.steers.clear()
-
     result = turn.result
     usage = shim_translation.usage_from(
         result.usage,
@@ -428,9 +443,12 @@ def _output_schema(
         return None, build_schema_hint(response_cls)
 
     host_dir = live.spec.workspace / _SCHEMA_DIR
+    cli_dir = live.agent_path(str(host_dir))
     return (
         agentshim.OutputSchema(
-            schema=schema, host_dir=host_dir, cli_dir=live.agent_path(str(host_dir))
+            schema=schema,
+            host_dir=host_dir,
+            cli_dir=cli_dir if cli_dir != str(host_dir) else None,
         ),
         "",
     )

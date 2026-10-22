@@ -22,6 +22,7 @@ from agentshim.testing import (
     CodexScript,
     FakeClock,
     FakeExecutor,
+    FakeRun,
     Hang,
     ReportRateLimits,
     Say,
@@ -188,6 +189,75 @@ def test_providers_without_a_stream_transport_stay_one_process_per_turn(
     assert executor.spawns == []
     turns = [r for r in executor.requests if "--help" not in r.argv]
     assert len(turns) == 2
+
+
+@pytest.mark.parametrize("provider", ONE_SHOT_PROVIDERS)
+@pytest.mark.parametrize(
+    ("failure", "error_type"),
+    [
+        (FakeRun(timeout=True), AgentTurnTimeoutError),
+        (FakeRun(returncode=1, stderr=["fatal failure\n"]), agentshim.CliExitError),
+    ],
+)
+def test_failed_one_shot_container_turn_is_reaped_before_retry(
+    tmp_path: Path, provider: str, failure: FakeRun, error_type: type[Exception]
+) -> None:
+    sandbox = FakeDockerConfinement(workspace=tmp_path)
+    running = False
+    launches: list[agentshim.CommandRequest] = []
+    reaped: list[str] = []
+
+    def run(request: agentshim.CommandRequest) -> FakeRun:
+        nonlocal running
+        if "--help" in request.argv:
+            return FakeRun()
+        if list(request.argv[-3:-1]) == ["sh", "-c"]:
+            reaped.append(request.argv[2])
+            running = False
+            return FakeRun()
+        assert not running, "a previous confined agent is still running"
+        launches.append(request)
+        if len(launches) == 1:
+            running = True
+            return failure
+        return scripted_turn(provider, text="recovered")
+
+    executor = FakeExecutor(run)
+    session = _launcher(provider, executor, sandbox).launch(_container_spec(tmp_path, provider))
+
+    with pytest.raises(error_type):
+        session.run_turn(AgentTurnRequest(message="first", timeout=timedelta(seconds=5)))
+
+    assert not running
+    assert reaped == [sandbox.container_id]
+    assert "AGENTSHIM_CONFINED=1" in launches[0].argv
+    assert session.run_turn(AgentTurnRequest(message="retry")).text == "recovered"
+
+
+@pytest.mark.parametrize("provider", ONE_SHOT_PROVIDERS)
+def test_failed_container_reaping_blocks_another_turn(tmp_path: Path, provider: str) -> None:
+    sandbox = FakeDockerConfinement(workspace=tmp_path)
+    launches = 0
+
+    def run(request: agentshim.CommandRequest) -> FakeRun:
+        nonlocal launches
+        if "--help" in request.argv:
+            return FakeRun()
+        if list(request.argv[-3:-1]) == ["sh", "-c"]:
+            return FakeRun(returncode=7, stderr=["cleanup failed\n"])
+        launches += 1
+        return FakeRun(timeout=True)
+
+    session = _launcher(provider, FakeExecutor(run), sandbox).launch(
+        _container_spec(tmp_path, provider)
+    )
+
+    with pytest.raises(agentshim.ReapError, match="cleanup failed"):
+        session.run_turn(AgentTurnRequest(message="first", timeout=timedelta(seconds=5)))
+    with pytest.raises(RuntimeError, match="session is closed"):
+        session.run_turn(AgentTurnRequest(message="must not overlap"))
+
+    assert launches == 1
 
 
 class _SteerWhenRunning:
