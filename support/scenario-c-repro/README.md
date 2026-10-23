@@ -28,6 +28,24 @@ typed tool-exclusion contract 实施，不向候选提供其他方向的历史�
 不得绕过租约直接调用 `stage.sh`。三个方向可并行调用 `launch.sh`。
 租约丢失或停止时仅清理带本次 run-id 的容器，不影响别人的任务。
 
+### Designer outer-loop agent 模式
+
+新实验调用 `prepare.sh SOURCE EXP SETUP_RUN agent`，使用原生
+`--outer-loop agent --inner-loop multi-agent --interface service`，
+由 designer 提出 hypothesis，implementer 实现，judge 审查，再由框架执行正式门禁。
+模式写入 setup 的 `scripts/outer-loop.txt`，随控制脚本复制并记录摘要；
+非法模式在准备或启动阶段拒绝，不会静默回落到 plain。
+省略第四参数仍选择 plain，保持原有入口行为；旧 setup 必须继续使用其原有
+脚本，不能混搭新 stage。`pilot` 是历史诊断入口，不用于 designer 复现。
+
+agent 模式显式固定 `max-rounds=15`、`max-retries-per-round=3`、
+`judge-every=3`；被提名候选和最后一轮仍按框架规则立即审查。
+这里 15 表示 agent rounds，不表示 15 次性能分析，不能与 plain 的预算等同。
+所有角色使用同一份固定 Copilot 模型配置，不从其他实验继承 roadmap、
+候选或会话；新模式仍独立重测 AR/EAGLE3 后才开始搜索。
+运行记录同时保存模式、模型与精确源码 commit；需从原生角色事件核验
+designer（内部角色名 orchestrator）实际启动，不能只凭目录名判断模式。
+
 用户在诊断后允许不用 gpuctl。此时必须显式调用
 `launch.sh SOURCE EXP SETUP_RUN GPU_INDEX`，三个方向给出不同的空卡，
 每阶段仍检查显存与利用率并显式导出 `CUDA_VISIBLE_DEVICES`。这种模式不持有

@@ -17,6 +17,11 @@ VS_RUN_ID="$(basename "$SOURCE")-$RUN_ID"
 mkdir "$RUN"
 mkdir "$RUN/scripts" "$RUN/logs" "$RUN/plots"
 cp "$SETUP/scripts/"* "$RUN/scripts/"
+OUTER_LOOP="$(< "$RUN/scripts/outer-loop.txt")"
+if [[ "$OUTER_LOOP" != plain && "$OUTER_LOOP" != agent ]]; then
+    echo "unsupported outer loop: $OUTER_LOOP (expected plain or agent)" >&2
+    exit 2
+fi
 exec > >(tee "$RUN/logs/driver.log") 2>&1
 export PATH="$SOURCE/.venv/bin:/home/yuzhengw/.local/bin:$PATH"
 export GIT_AUTHOR_NAME=wangyuzheng GIT_AUTHOR_EMAIL=yuuzhwang@gmail.com
@@ -107,7 +112,10 @@ cat > "$RUN/README.md" <<EOF
 - tested_commit=$ENGINE_COMMIT；agentshim=$SHIM_COMMIT。
 - candidate=$CANDIDATE；initial_commit=$CANDIDATE_COMMIT。
 - agent=Copilot CLI；model=$AGENT_MODEL；reasoning=high；独立 HOME=$HOME。
-- optimize：issue-tracker plain / local，max-rounds=15，无跨实验 issue store。
+- optimize：outer-loop=$OUTER_LOOP，max-rounds=15，无跨实验状态。
+- agent：inner-loop=multi-agent，interface=service，judge-every=3，
+  max-retries-per-round=3；独立 designer / implementer / judge。
+- plain：issue-tracker local；15 轮指性能分析上限，不与 agent rounds 混用。
 - baseline：vLLM 0.32.0；$IMAGE。
 - 单 GPU bf16；memory-utilization=0.95；max-model-len=4096；EAGLE3 K=7。
 - 请求：50，warmup=3，seed=42，Python3，temperature=0，max_tokens=512。
@@ -127,7 +135,7 @@ performance-evaluator 工作流后，由公开 RunHandle.stop() 自动安全停�
 未达到该条件不能把命令退出或本地自测当作打通。
 EOF
 fi
-python - "$RUN/logs/pins.json" "$ENGINE_COMMIT" "$SHIM_COMMIT" "$CANDIDATE_COMMIT" "$AGENT_MODEL" <<'PY'
+python - "$RUN/logs/pins.json" "$ENGINE_COMMIT" "$SHIM_COMMIT" "$CANDIDATE_COMMIT" "$AGENT_MODEL" "$OUTER_LOOP" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -138,6 +146,7 @@ Path(sys.argv[1]).write_text(json.dumps({
     "draft_model": "AngelSlim/Qwen3-32B_eagle3@74789e1a6a4b705a71d040315d911b58fb2a80ef",
     "dataset": "m-a-p/CodeEditorBench@9bd3f75915e7583feae1d0e98c09176c20a6bd1d",
     "agent_provider": "copilot", "agent_model": sys.argv[5],
+    "outer_loop": sys.argv[6],
 }, indent=2) + "\n")
 PY
 sha256sum "$RUN/scripts/"* > "$RUN/logs/scripts.sha256"
@@ -154,10 +163,15 @@ if [[ "$MODE" == pilot ]]; then
     wait "$CHILD"
     CHILD=""
 elif [[ "$MODE" == optimize ]]; then
-    vibesys --headless --outer-loop plain --project "$CANDIDATE" --task default \
+    LOOP_ARGS=(--tracker-backend local)
+    if [[ "$OUTER_LOOP" == agent ]]; then
+        LOOP_ARGS=(--inner-loop multi-agent --interface service \
+            --max-retries-per-round 3 --judge-every 3)
+    fi
+    vibesys --headless --outer-loop "$OUTER_LOOP" --project "$CANDIDATE" --task default \
         --config "$RUN/scripts/copilot-sol.toml" --agent-backend cli --cli-provider copilot \
         --model "$AGENT_MODEL" --allow-unvetted-model --backend cuda \
-        --max-rounds 15 --tracker-backend local --run-id "$VS_RUN_ID" &
+        --max-rounds 15 "${LOOP_ARGS[@]}" --run-id "$VS_RUN_ID" &
     CHILD=$!
     wait "$CHILD"
     CHILD=""

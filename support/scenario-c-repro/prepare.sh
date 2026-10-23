@@ -4,6 +4,11 @@ set -euo pipefail
 SOURCE="$(realpath "$1")"
 EXP="$(realpath "$2")"
 SETUP_ID="${3:-20261020_152200_setup}"
+OUTER_LOOP="${4:-plain}"
+if [[ "$OUTER_LOOP" != plain && "$OUTER_LOOP" != agent ]]; then
+    echo "unsupported outer loop: $OUTER_LOOP (expected plain or agent)" >&2
+    exit 2
+fi
 SETUP="$EXP/runs/$SETUP_ID"
 SEED="/mnt_ssd/data1/wyz/projects/kb/exps/20261018_115909_scenario-c/runs/20261018_120300_setup/candidate"
 SEED_COMMIT="cfcdc802dd2de09afa6c2011821e577c3879e9cc"
@@ -41,6 +46,7 @@ test -f "$SOURCE/support/scenario-c-repro/copilot-sol.toml"
 mkdir -p "$SETUP/scripts" "$SETUP/logs" "$SETUP/plots"
 cp "$SOURCE/support/scenario-c-repro/"* "$SETUP/scripts/"
 cp "$SOURCE/scripts/scenario_c_pilot.py" "$SETUP/scripts/scenario_c_pilot.py"
+printf '%s\n' "$OUTER_LOOP" > "$SETUP/scripts/outer-loop.txt"
 mkdir "$SETUP/candidate"
 git -C "$SEED" archive "$SEED_COMMIT" | tar -x -C "$SETUP/candidate"
 cp "$REFERENCE" "$SETUP/candidate/.vibesys/tasks/default/reference/reference.py"
@@ -101,7 +107,7 @@ if [[ ! -f "$EXP/README.md" ]]; then
     cat > "$EXP/README.md" <<EOF
 # Scenario C / $(basename "$SOURCE")
 
-目标：独立进行最多 15 次性能分析的 Copilot CLI / $AGENT_MODEL / high 优化，并独立测量
+目标：独立进行 Copilot CLI / $AGENT_MODEL / high 优化，并独立测量
 vLLM AR、EAGLE3 基线。硬件为 A100-SXM4-80GB，不是论文 H100。
 
 - 源码 worktree：$SOURCE。
@@ -109,7 +115,9 @@ vLLM AR、EAGLE3 基线。硬件为 A100-SXM4-80GB，不是论文 H100。
 - 隔离：独立 candidate 仓库、HOME、Copilot 会话、VibeSys issue tracker、
   Docker 容器及随机模型对话；没有从其他实验候选生成的 seed。
 - 共享：固定 revision 的公共权重，只读挂载；不共享生成的程序、建议或结果。
-- 控制流：AR → EAGLE3 → plain issue-tracker 15 轮。
+- 控制流：AR → EAGLE3 → $OUTER_LOOP；预算 max-rounds=15。
+- agent 模式为 multi-agent / service，包含 designer、implementer、judge；
+  15 表示 agent rounds，不等于 plain 模式的性能分析次数。
 - 原始 example 未实现服务。输入沿用原始 checker/benchmark，仅固定 dataset
   revision、携带 vs-bench、补齐 Jinja2 与只读 Transformers reference。
 - fixture=$SEED_COMMIT；这是未启动 GPU 搜索的输入包，不含 learned candidate。
@@ -141,6 +149,7 @@ cat > "$SETUP/README.md" <<EOF
 - candidate initial_commit=$CANDIDATE_COMMIT。
 - seed_kind=$SEED_KIND；seed_repository=$SEED；seed_commit=$SEED_COMMIT。
 - 模型：Copilot $AGENT_MODEL，high；目标权重位于 /mnt_ssd/data1/models。
+- outer_loop=$OUTER_LOOP；选择已固定在 scripts/outer-loop.txt，运行阶段不读取模式环境变量。
 - setup 仅为 CPU 准备，不产生性能数据。GPU 任务必须经 gpuctl 启动。
 EOF
 printf '# 准备结果\n\n输入校验通过；尚未进行 GPU 性能测量。\n\n建议：保留公共输入 pin 和控制脚本。\n' > "$SETUP/summary.md"
