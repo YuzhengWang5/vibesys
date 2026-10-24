@@ -1,0 +1,9 @@
+[model]
+name = "gpt-6.1-sol"
+
+[agent]
+backend = "cli"
+cli_provider = "copilot"
+
+[agent.quota]
+policy = "fail"

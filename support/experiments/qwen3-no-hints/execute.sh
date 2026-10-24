@@ -36,7 +36,7 @@ exec "$python" -c 'from entrypoints.launcher import main; main()' \
     --config "$run_dir/scripts/agent.toml" \
     --outer-loop agent --agent-backend cli --cli-provider copilot \
     --model gpt-6.1-sol --allow-unvetted-model \
-    --run-environment docker --interface service --local \
+    --run-environment docker --interface service --profiler none --local \
     --max-rounds 24 --max-in-flight 1 --evaluation-slots 1 --max-backlog 0 \
     --constraint "本次是独立盲实验。不得访问其他实验、其他候选仓库、历史 exps 或共享账号的历史会话和记忆；不得借助 Git refs、日志、网络或其他旁路获取这些内容。只使用本次候选仓库、当前任务输入、框架工具以及公开技术资料。" \
     >"$run_dir/logs/vibesys.log" 2>&1
