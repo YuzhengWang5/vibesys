@@ -1,6 +1,6 @@
 # qwen3-32b-code-edit — predicted-outputs benchmark
 
-This input bundle measures **single-batch tok/s** of an OpenAI-style [predicted-outputs](https://developers.openai.com/api/docs/guides/predicted-outputs) server for `Qwen/Qwen3-32B` on the **code-debug** subset of [`m-a-p/CodeEditorBench`](https://huggingface.co/datasets/m-a-p/CodeEditorBench). The benchmark sends the buggy original code as `prediction.content` on every request; the server is expected to consume that prediction as the draft sequence for speculative decoding against the target.
+This input bundle measures **single-batch tok/s** of an OpenAI-style server for `Qwen/Qwen3-32B` on the **code-debug** subset of [`m-a-p/CodeEditorBench`](https://huggingface.co/datasets/m-a-p/CodeEditorBench). The benchmark sends the buggy original code as `prediction.content` on every request. The implementation and optimization strategy are not prescribed.
 
 **Single-batch only.** Concurrency 1. The metric the orchestrator tracks is `median_tok_per_sec` from `.vibesys/tasks/default/benchmark/benchmark.py`.
 
@@ -46,7 +46,7 @@ The benchmark drives an OpenAI-compatible `/v1/completions` endpoint. Every requ
 }
 ```
 
-The `prediction` field is the OpenAI predicted-outputs format. Servers that don't implement it (vLLM, SGLang today) just ignore it; a server that does implement it is the configuration this benchmark scores.
+The `prediction` field uses the OpenAI predicted-outputs format. The server must accept this request envelope; how it uses the field is an implementation choice.
 
 ## How to run
 

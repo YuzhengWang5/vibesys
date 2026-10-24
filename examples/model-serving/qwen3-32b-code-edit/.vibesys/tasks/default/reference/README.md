@@ -1,6 +1,6 @@
 # Reference bundle — Qwen/Qwen3-32B
 
-There is **no separate drafter**. The predicted-outputs path uses the request's `prediction.content` as its draft sequence — see the implementation sketch in `OBJECTIVE.md`. No EAGLE3 head, no Qwen3-0.6B drafter, no draft-model KV cache.
+The target model is `Qwen/Qwen3-32B`. The implementation and optimization strategy are not prescribed.
 
 ## Files in this directory
 
