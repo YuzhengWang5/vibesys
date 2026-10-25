@@ -37,3 +37,11 @@ bash RUN_DIR/scripts/supervise.sh WORKTREE EXPERIMENT_DIR RUN_DIR GPU
 `test_candidate_source_check_preserves_framework_state`、
 `test_inspector_keeps_resume_identity_before_first_event` 和
 `test_prepare_recovers_resume_identity_before_first_event` 覆盖。
+
+resume 通过新 run 的 `logs/vibesys-state` 符号链接继续使用上一尝试的同一个
+`VIBESYS_STATE_HOME`，保留会话绑定、执行回执和工作区所有权；只复用候选仓库与
+portable checkpoint、却换用空的本机状态目录，不是有效恢复。多次 resume 直接
+指向同一实际状态目录，日志与 inspector 也读取该目录，不复制或猜补恢复凭据。
+目录缺失、不是目录或链接失效时，准备阶段明确失败，不取得 GPU 租约。
+对应回归为 `test_prepare_recovers_resume_identity_before_first_event` 和
+`test_prepare_refuses_resume_without_local_state`。

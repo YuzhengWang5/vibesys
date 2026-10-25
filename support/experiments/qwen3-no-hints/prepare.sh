@@ -20,6 +20,11 @@ if test "$mode" = resume; then
         printf 'ERROR: 无法从 %s 恢复 run ID；拒绝猜测其他 run。\n' "$previous" >&2
         exit 2
     fi
+    if ! test -d "$previous/logs/vibesys-state"; then
+        printf 'ERROR: 缺少恢复所需的本机状态目录 %s/logs/vibesys-state；拒绝使用空状态恢复。\n' "$previous" >&2
+        exit 2
+    fi
+    state_home=$(realpath "$previous/logs/vibesys-state")
 fi
 test -z "$(git -C "$worktree" status --porcelain)"
 commit=$(git -C "$worktree" rev-parse HEAD)
@@ -62,6 +67,7 @@ printf '\n- run `%s` → tested_commit `%s`，mode `%s`\n' \
 if test "$mode" = resume; then
     test -n "$previous" && test -n "$resume_id"
     ln -s "$(realpath "$previous/project")" "$run_dir/project"
+    ln -s "$state_home" "$run_dir/logs/vibesys-state"
     printf '%s\n' "$resume_id" >"$run_dir/scripts/resume_run_id"
 else
     "$python" - "$worktree" "$run_dir/project" <<'PY' >"$run_dir/logs/materialization.log"

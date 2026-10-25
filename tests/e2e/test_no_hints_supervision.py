@@ -175,7 +175,10 @@ def test_inspector_keeps_resume_identity_before_first_event(tmp_path: Path) -> N
     assert status["terminal"] == terminal
 
 
-def test_prepare_recovers_resume_identity_before_first_event(tmp_path: Path) -> None:
+@pytest.mark.parametrize("resume_depth", [0, 1, 3])
+def test_prepare_recovers_resume_identity_before_first_event(
+    tmp_path: Path, resume_depth: int
+) -> None:
     # The shell entrypoint must carry the checkpoint across a failed pre-launch resume.
     worktree = tmp_path / "worktree"
     scripts = worktree / "support/experiments/qwen3-no-hints"
@@ -186,10 +189,26 @@ def test_prepare_recovers_resume_identity_before_first_event(tmp_path: Path) -> 
     previous = tmp_path / "experiment/runs/previous"
     (previous / "scripts").mkdir(parents=True)
     (previous / "scripts/resume_run_id").write_text("resume-target\n")
+    state_home = previous / "logs/vibesys-state"
+    binding = state_home / "projects/project/runs/resume-target/receipts/session-binding.json"
+    binding.parent.mkdir(parents=True)
+    binding.write_text('{"retained":"session-resource"}\n')
+    _events(
+        previous,
+        [{"run_id": "resume-target", "sequence": 1, "type": "run_started", "status": "active"}],
+    )
     project = previous / "project"
     project.mkdir()
     _git(project, "init", "-q")
     _git(project, "commit", "--allow-empty", "-qm", "input")
+    for index in range(resume_depth):
+        successor = tmp_path / f"experiment/runs/resume-{index}"
+        (successor / "scripts").mkdir(parents=True)
+        (successor / "scripts/resume_run_id").write_text("resume-target\n")
+        (successor / "logs").mkdir()
+        (successor / "logs/vibesys-state").symlink_to(previous / "logs/vibesys-state")
+        (successor / "project").symlink_to(previous / "project")
+        previous = successor
 
     result = run_test_command(
         [
@@ -211,4 +230,57 @@ def test_prepare_recovers_resume_identity_before_first_event(tmp_path: Path) -> 
 
     assert (resumed / "scripts/resume_run_id").read_text() == "resume-target\n"
     assert (resumed / "project").resolve() == project
+    resumed_state = resumed / "logs/vibesys-state"
+    assert resumed_state.resolve() == state_home
+    assert resumed_state.readlink() == state_home
+    assert (resumed_state / binding.relative_to(state_home)).read_bytes() == binding.read_bytes()
+    (resumed_state / "continued.json").write_text('{"resumed":true}\n')
+    assert (state_home / "continued.json").read_text() == '{"resumed":true}\n'
+    status = _inspect(resumed, "no")
+    assert status["run_id"] == "resume-target"
+    assert status["last_event"] == "run_started"
     assert _git(project, "status", "--porcelain") == ""
+
+
+@pytest.mark.parametrize("state", ["absent", "file", "broken-link"])
+def test_prepare_refuses_resume_without_local_state(tmp_path: Path, state: str) -> None:
+    worktree = tmp_path / "worktree"
+    scripts = worktree / "support/experiments/qwen3-no-hints"
+    shutil.copytree(_SCRIPTS, scripts)
+    _git(worktree, "init", "-q")
+    _git(worktree, "add", "--all")
+    _git(worktree, "commit", "-qm", "initial")
+    previous = tmp_path / "experiment/runs/previous"
+    (previous / "scripts").mkdir(parents=True)
+    (previous / "scripts/resume_run_id").write_text("resume-target\n")
+    (previous / "logs").mkdir()
+    state_home = previous / "logs/vibesys-state"
+    if state == "file":
+        state_home.write_text("not a state directory")
+    elif state == "broken-link":
+        state_home.symlink_to(tmp_path / "missing-state")
+    project = previous / "project"
+    project.mkdir()
+    _git(project, "init", "-q")
+    _git(project, "commit", "--allow-empty", "-qm", "input")
+
+    result = run_test_command(
+        [
+            "bash",
+            str(scripts / "prepare.sh"),
+            str(worktree),
+            str(tmp_path / "experiment"),
+            "4",
+            "resume",
+            str(previous),
+            "",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=HANG_GUARD_S,
+    )
+
+    assert result.returncode == 2
+    assert str(state_home) in result.stderr
+    assert "拒绝使用空状态恢复" in result.stderr
+    assert list((tmp_path / "experiment/runs").iterdir()) == [previous]
