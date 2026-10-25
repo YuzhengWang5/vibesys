@@ -36,6 +36,7 @@ from vs_core.api import (
     CheckpointDecline,
     CheckpointFailure,
     CloseAttemptScope,
+    CompletionStatus,
     Continuation,
     ContinuationId,
     ContinuationPhase,
@@ -44,12 +45,16 @@ from vs_core.api import (
     CoreState,
     DecisionId,
     DecisionReceipt,
+    DiscardWorkspace,
+    DispatchAuthorized,
     DispatchTurn,
     EnsureSession,
     EnsureWorkspace,
     EventCursor,
     EventId,
     ExecuteRegisteredOperation,
+    Failed,
+    FailureReason,
     HostFence,
     HostId,
     InitialSessionsFailed,
@@ -76,8 +81,10 @@ from vs_core.api import (
     OperationRegistry,
     OperationRequest,
     PoolId,
+    RejectionCode,
     ReleaseDependency,
     RequestId,
+    RequestObserved,
     RequestPhase,
     RequestRecord,
     RequestTurn,
@@ -1439,6 +1446,64 @@ def test_setup_failure_cannot_mint_a_charge_for_an_untracked_request(
     )
     assert result.state.attempts == state.attempts
     assert result.requests == ()
+
+
+@given(
+    status=st.sampled_from(
+        (ObservationStatus.REJECTED, ObservationStatus.FAILED, ObservationStatus.CANCELLED)
+    ),
+    sequence=st.integers(min_value=1, max_value=100),
+)
+def test_conclusive_workspace_setup_failure_resolves_the_start_wait(
+    status: ObservationStatus, sequence: int
+) -> None:
+    state = acquiring_state()
+    observed = observation(RequestId(root="workspace"), status).model_copy(
+        update={
+            "sequence": sequence,
+            "accepted": False,
+            "released": True,
+            "children_complete": True,
+        }
+    )
+    result = step(
+        reload_state(state),
+        RequestObserved(observation=observed, setup_failure=SetupFailureKind.PERMANENT),
+    )
+    owner = assert_setup_retired(result)
+    assert observed.request_id not in owner.pending_records
+    assert result.state.run.receipts[0].completion == CompletionStatus.FAILED
+    assert (
+        Failed(
+            decision=DecisionId(root="owner"),
+            reason=FailureReason.REFUSED,
+            cause=RejectionCode.DEPENDENCY,
+        )
+        in result.events
+    )
+    replayed = step(result.state, RequestObserved(observation=observed))
+    assert replayed.state.attempts == result.state.attempts
+    assert replayed.state.run.receipts == result.state.run.receipts
+    assert replayed.events == ()
+    state = result.state
+    cleanup = result.requests
+    for kind in (CloseAttemptScope, DiscardWorkspace):
+        (request,) = cleanup
+        assert isinstance(request, kind)
+        assert request.request_id is not None
+        state = step(state, DispatchAuthorized(request_id=request.request_id, now_at=1.0)).state
+        closed = observation(request.request_id).model_copy(
+            update={
+                "event_id": EventId(root=f"closed:{request.request_id.root}"),
+                "released": True,
+                "children_complete": True,
+            }
+        )
+        result = step(reload_state(state), RequestObserved(observation=closed))
+        state, cleanup = result.state, result.requests
+    assert project(state).attempts[0].phase == AttemptPhase.TERMINAL
+    assert state.scheduling.slots == ()
+    assert cleanup == ()
 
 
 @given(st.sampled_from(tuple(AttemptPhase)))

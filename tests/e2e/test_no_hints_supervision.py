@@ -179,7 +179,10 @@ def test_candidate_startup_checks_clean_repository_and_mode(
         assert mode in result.stderr
 
 
-def test_resume_preparation_reuses_saved_run_id_before_any_events(tmp_path: Path) -> None:
+@pytest.mark.parametrize("local_state", [False, True])
+def test_resume_preparation_reuses_saved_run_id_and_local_receipts(
+    tmp_path: Path, *, local_state: bool
+) -> None:
     worktree = tmp_path / "worktree"
     scripts = worktree / "support/experiments/qwen3-no-hints"
     scripts.mkdir(parents=True)
@@ -189,6 +192,11 @@ def test_resume_preparation_reuses_saved_run_id_before_any_events(tmp_path: Path
     previous = project.parent
     (previous / "scripts").mkdir()
     (previous / "scripts/resume_run_id").write_text("saved-run\n")
+    state_home = previous / "logs/vibesys-state"
+    receipt = state_home / "projects/project/runs/saved-run/receipts/workspace-revisions/fixture"
+    if local_state:
+        receipt.parent.mkdir(parents=True)
+        receipt.write_text("retained-revision\n")
     for repo in (worktree, project):
         for args in (
             ("init", "--quiet"),
@@ -224,11 +232,20 @@ def test_resume_preparation_reuses_saved_run_id_before_any_events(tmp_path: Path
         ],
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
         timeout=HANG_GUARD_S,
     )
+    if not local_state:
+        assert result.returncode != 0
+        assert "vibesys-state" in result.stderr
+        return
+    assert result.returncode == 0, result.stderr
     prepared = Path(result.stdout.strip())
 
     assert (prepared / "scripts/resume_run_id").read_text() == "saved-run\n"
     assert (prepared / "project").resolve() == project
-    assert not (previous / "logs").exists()
+    copied = prepared / "logs/vibesys-state" / receipt.relative_to(state_home)
+    assert copied.read_text() == "retained-revision\n"
+    assert not copied.samefile(receipt)
+    copied.write_text("new-host\n")
+    assert receipt.read_text() == "retained-revision\n"

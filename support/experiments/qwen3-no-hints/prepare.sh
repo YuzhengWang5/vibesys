@@ -14,6 +14,10 @@ if test "$mode" = resume; then
         resume_id=$(cat "$previous/scripts/resume_run_id")
     fi
     test -n "$resume_id"
+    if ! test -d "$previous/logs/vibesys-state"; then
+        echo "resume requires the checkpoint's local state: $previous/logs/vibesys-state" >&2
+        exit 1
+    fi
 fi
 test -z "$(git -C "$worktree" status --porcelain)"
 commit=$(git -C "$worktree" rev-parse HEAD)
@@ -56,6 +60,7 @@ printf '\n- run `%s` → tested_commit `%s`，mode `%s`\n' \
 if test "$mode" = resume; then
     test -n "$previous" && test -n "$resume_id"
     ln -s "$(realpath "$previous/project")" "$run_dir/project"
+    cp -a "$previous/logs/vibesys-state/." "$run_dir/logs/vibesys-state/"
     printf '%s\n' "$resume_id" >"$run_dir/scripts/resume_run_id"
 else
     "$python" - "$worktree" "$run_dir/project" <<'PY' >"$run_dir/logs/materialization.log"

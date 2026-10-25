@@ -36,3 +36,7 @@ bash RUN_DIR/scripts/supervise.sh WORKTREE EXPERIMENT_DIR RUN_DIR GPU
 `test_candidate_startup_checks_preserve_resume_state` 覆盖。
 若恢复尝试在产生事件前失败，准备脚本从该次尝试保存的 `resume_run_id`
 恢复目标，不依赖尚不存在的事件日志。
+恢复还会把最近 checkpoint 的 `logs/vibesys-state` 独立复制到新 run：
+其中的工作区绑定、版本归属、执行回执与候选中的 core-store 是同一恢复单元。
+缺少本地状态时明确拒绝恢复，不能以空回执库启动；复制不覆写旧 run。
+回归由 `test_resume_preparation_reuses_saved_run_id_and_local_receipts` 覆盖。

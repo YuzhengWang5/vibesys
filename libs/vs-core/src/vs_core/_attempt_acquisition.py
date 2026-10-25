@@ -77,12 +77,14 @@ from .types.common import (
     ChargeId,
     ChargeKind,
     ChargeReceipt,
+    CompletionStatus,
     ContractValidationError,
     DecisionId,
     ExecuteRegisteredOperation,
     InvocationRef,
     Observation,
     ObservationStatus,
+    RejectionCode,
     RequestId,
     RevisionAuthority,
     RunStatus,
@@ -92,7 +94,7 @@ from .types.common import (
     WorkspaceRef,
 )
 from .types.evaluation import ContinuationPhase
-from .types.kernel import AreaChange, DecisionReceipt
+from .types.kernel import AreaChange, DecisionCompleted, DecisionReceipt
 from .types.records import (
     InspectRequest,
     Outbound,
@@ -113,6 +115,7 @@ from .types.sessions import (
     SessionsAcquireRequested,
 )
 from .types.strategy import Operation, RequestTurn, StartAttempt
+from .types.until import Failed, FailureReason
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptsEvent
@@ -628,13 +631,30 @@ def _setup_failed(
             ),
         )
     )
-    updated = attempt.model_copy(update={"charges": charges})
+    updated = attempt.model_copy(
+        update={
+            "charges": charges,
+            "pending_records": tuple(
+                identity
+                for identity in attempt.pending_records
+                if identity != observation.request_id
+                or not (observation.released and observation.children_complete)
+            ),
+        }
+    )
     return AreaChange(
         state=_replace(state, updated),
         events=(AttemptExhausted(attempt=attempt_ref(attempt), reason="paid-limit"),)
         if exhausted
-        else (),
+        else (
+            Failed(
+                decision=attempt.admission_id,
+                reason=FailureReason.REFUSED,
+                cause=RejectionCode.DEPENDENCY,
+            ),
+        ),
         signals=(
+            DecisionCompleted(decision_id=attempt.admission_id, status=CompletionStatus.FAILED),
             RetireRequested(
                 attempt=attempt_ref(attempt),
                 disposition="cancel",
