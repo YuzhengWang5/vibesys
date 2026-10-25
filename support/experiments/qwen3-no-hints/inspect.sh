@@ -18,6 +18,9 @@ files = sorted((logs / "vibesys-state").glob("projects/*/runs/*/logs/core-events
 failures = []
 last_event = None
 run_id = None
+resume_file = root / "scripts/resume_run_id"
+if resume_file.exists():
+    run_id = resume_file.read_text().strip() or None
 last_progress = int((logs / "launcher.log").stat().st_mtime) if (logs / "launcher.log").exists() else args.now
 for path in files:
     last_progress = max(last_progress, int(path.stat().st_mtime))

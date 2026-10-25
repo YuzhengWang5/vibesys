@@ -8,6 +8,19 @@ mode=${4:-restart}
 previous=${5:-}
 resume_id=${6:-}
 case "$mode" in restart|resume) ;; *) echo "invalid mode: $mode" >&2; exit 2 ;; esac
+if test "$mode" = resume; then
+    if test -z "$previous"; then
+        echo 'ERROR: resume 需要上一尝试目录。' >&2
+        exit 2
+    fi
+    if test -z "$resume_id" && test -f "$previous/scripts/resume_run_id"; then
+        resume_id=$(cat "$previous/scripts/resume_run_id")
+    fi
+    if test -z "$resume_id"; then
+        printf 'ERROR: 无法从 %s 恢复 run ID；拒绝猜测其他 run。\n' "$previous" >&2
+        exit 2
+    fi
+fi
 test -z "$(git -C "$worktree" status --porcelain)"
 commit=$(git -C "$worktree" rev-parse HEAD)
 export GIT_AUTHOR_NAME=wangyuzheng GIT_AUTHOR_EMAIL=yuuzhwang@gmail.com

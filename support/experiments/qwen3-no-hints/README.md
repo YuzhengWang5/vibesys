@@ -29,3 +29,11 @@ bash RUN_DIR/scripts/supervise.sh WORKTREE EXPERIMENT_DIR RUN_DIR GPU
 代替准确性/吞吐证据。方向级 `supervisor/active_run` 指向最新尝试，
 `supervisor/supervisor.log` 和每次维护的 `decision.json` 记录介入与理由。
 旧 run 的脚本、pin 和结果不覆写；不自动提交或 push `exps/`。
+
+恢复时的源码检查排除框架拥有的 `.vibesys/state/runs` 和
+`.vibesys/state/local`，但仍拒绝其他未提交改动。启动前失败尚无新事件时，
+检查器和下一次准备从该尝试的 `scripts/resume_run_id` 保留恢复目标，
+不扫描或猜测其他 run。对应回归由
+`test_candidate_source_check_preserves_framework_state`、
+`test_inspector_keeps_resume_identity_before_first_event` 和
+`test_prepare_recovers_resume_identity_before_first_event` 覆盖。
