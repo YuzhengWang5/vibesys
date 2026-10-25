@@ -5,8 +5,10 @@ import json
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
-from vibesys.events import CoreEvent, CoreEventType, GateFinishedData
+from vibesys.events import CoreEvent, CoreEventType, GateFinishedData, SubprocessOutputData
 from vibesys.run.evaluation import CoreLocalValidationEvents
 from vibesys.run.event_journal import EventJournal
 from vs_runtime.api import CommandResult
@@ -85,6 +87,59 @@ def test_local_validation_redacts_before_bounding_gate_output(
     assert finished.data.output_tail is not None
     assert len(finished.data.output_tail) <= _GATE_OUTPUT_LIMIT
     assert "gate-secret" not in finished.data.output_tail
+    output = next(event for event in captured if event.type is CoreEventType.SUBPROCESS_OUTPUT)
+    assert isinstance(output.data, SubprocessOutputData)
+    assert "gate-secret" not in output.data.content
+    assert captured.index(output) < captured.index(finished)
+
+
+@given(
+    output=st.text(alphabet="abcdefghijklmnopqrstuvwxyz \n", min_size=1, max_size=2000),
+    passed=st.booleans(),
+    reused=st.booleans(),
+)
+def test_local_validation_publishes_executed_output_before_each_gate(
+    output: str, *, passed: bool, reused: bool
+) -> None:
+    journal = EventJournal(clock=ManualClock(), threads=SimThreads())
+    captured: list[CoreEvent] = []
+    journal.subscribe(captured.append)
+    events = CoreLocalValidationEvents(journal, round_label="local-validation-7")
+    recipe = ValidationRecipe(
+        name="cpu-contract",
+        command="python -m unittest",
+        input_paths=("input.py",),
+        purpose="Exercise validation command diagnostics.",
+    )
+    result = FrameworkValidationResult(
+        recipe=recipe,
+        input_digest="digest",
+        passed=passed,
+        reused=reused,
+        output=output,
+        error=None if passed else "command exited nonzero",
+    )
+
+    events.finished(result)
+    events.finished(result)
+
+    outputs = [event for event in captured if event.type is CoreEventType.SUBPROCESS_OUTPUT]
+    gates = [event for event in captured if event.type is CoreEventType.GATE_FINISHED]
+    assert len(gates) == 2
+    if reused:
+        assert outputs == []
+    else:
+        assert len(outputs) == 2
+        assert [event.type for event in captured] == [
+            CoreEventType.SUBPROCESS_OUTPUT,
+            CoreEventType.GATE_FINISHED,
+        ] * 2
+        for event in outputs:
+            assert isinstance(event.data, SubprocessOutputData)
+            assert event.data.content == output
+            assert event.data.process_kind == "validation"
+            assert event.round_label == "local-validation-7"
+        assert outputs[0].data != outputs[1].data
 
 
 def test_local_validation_preserves_an_explicitly_empty_safe_error() -> None:
@@ -150,3 +205,30 @@ def test_local_validation_sanitizes_an_omitted_operator_projection(
     assert finished.data.output_tail is not None
     assert "secret" not in finished.data.output_tail
     assert "[REDACTED]" in finished.data.output_tail
+    subprocess = next(event for event in captured if event.type is CoreEventType.SUBPROCESS_OUTPUT)
+    assert isinstance(subprocess.data, SubprocessOutputData)
+    assert "secret" not in subprocess.data.content
+
+
+def test_local_validation_preserves_explicitly_empty_safe_output() -> None:
+    journal = EventJournal(clock=ManualClock(), threads=SimThreads())
+    captured: list[CoreEvent] = []
+    journal.subscribe(captured.append)
+    recipe = ValidationRecipe(
+        name="empty-safe-output",
+        command="false",
+        input_paths=("input.py",),
+        purpose="Exercise explicit empty operator output.",
+    )
+
+    CoreLocalValidationEvents(journal).finished(
+        FrameworkValidationResult(
+            recipe=recipe,
+            input_digest="digest",
+            passed=False,
+            output="must-not-replace-explicit-empty",
+            operator_output="",
+        )
+    )
+
+    assert [event.type for event in captured] == [CoreEventType.GATE_FINISHED]

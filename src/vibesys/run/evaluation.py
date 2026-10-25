@@ -17,7 +17,11 @@ from vibesys.events import (
     SubprocessOutputData,
 )
 from vs_core.api import EvidenceKind
-from vs_redaction.api import redact_diagnostic_excerpt, redact_diagnostic_tail
+from vs_redaction.api import (
+    redact_diagnostic_excerpt,
+    redact_diagnostic_tail,
+    redact_diagnostic_text,
+)
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -163,6 +167,7 @@ class CoreLocalValidationEvents:
         """
         self._events = events
         self._round_label = round_label
+        self._identifiers = count(1)
 
     def started(self, recipe: ValidationRecipe) -> None:
         """Publish one ``GATE_STARTED`` for a validation recipe about to run."""
@@ -174,7 +179,26 @@ class CoreLocalValidationEvents:
         )
 
     def finished(self, result: FrameworkValidationResult) -> None:
-        """Publish one ``GATE_FINISHED`` for a validation recipe's settled result."""
+        """Publish executed command diagnostics before its ``GATE_FINISHED``.
+
+        Validation retains combined command output, so it is published as one
+        stdout stream. Reused passes do not represent a new subprocess.
+        """
+        output = result.operator_output if result.operator_output is not None else result.output
+        if output and not result.reused:
+            self._events.emit(
+                CoreEventType.SUBPROCESS_OUTPUT,
+                data=SubprocessOutputData(
+                    process_id=(
+                        f"{self._round_label or 'local-validation'}-"
+                        f"{next(self._identifiers)}-{result.recipe.name}"
+                    ),
+                    process_kind="validation",
+                    stream="stdout",
+                    content=redact_diagnostic_text(output),
+                ),
+                round_label=self._round_label,
+            )
         failure = (
             None
             if result.passed
