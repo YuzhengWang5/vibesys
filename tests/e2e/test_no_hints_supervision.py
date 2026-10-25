@@ -3,14 +3,27 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 import pytest
+from packaging.specifiers import SpecifierSet
 from tests.support import run_test_command
 
 from vs_sim.api.testing import HANG_GUARD_S
 
 _INSPECTOR = Path(__file__).resolve().parents[2] / "support/experiments/qwen3-no-hints/inspect.sh"
+
+
+@pytest.mark.parametrize("version", ["3.11", "3.12", "3.13", "3.14"])
+def test_example_python_support_is_compatible_with_its_sdk(version: str) -> None:
+    root = Path(__file__).resolve().parents[2]
+    example = root / "examples/model-serving/qwen3-32b-code-edit/pyproject.toml"
+    sdk = root / "sdk/vs-bench/pyproject.toml"
+    example_python = SpecifierSet(tomllib.loads(example.read_text())["project"]["requires-python"])
+    sdk_python = SpecifierSet(tomllib.loads(sdk.read_text())["project"]["requires-python"])
+
+    assert version not in example_python or version in sdk_python
 
 
 def _inspect(root: Path, running: str) -> dict[str, object]:

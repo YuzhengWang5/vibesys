@@ -56,7 +56,8 @@ When copying this example into a standalone project, materialize its
 `sdk/vs-bench` path dependency with VibeSys's
 `materialize_input_project` operation before committing the initial project.
 The checkout-relative `../../../sdk/vs-bench` path cannot work at `/workspace`
-inside an independent evaluation container. The evaluator also needs Jinja2
+inside an independent evaluation container. Use Python 3.12 or newer, as required
+by `vs-bench`. The evaluator also needs Jinja2
 for the tokenizer's chat template; it is an explicit input dependency.
 
 Implement a foreground `run_server.sh --model-dir /model --port PORT` in the
