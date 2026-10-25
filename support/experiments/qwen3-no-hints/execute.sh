@@ -30,6 +30,11 @@ nvidia-smi --id="$gpu" --query-gpu=index,uuid,name,memory.used,memory.total \
 "$python" -c 'import pathlib,sys,vibesys,vs_runtime,vs_agent; root=pathlib.Path(sys.argv[1]).resolve(); modules=(vibesys,vs_runtime,vs_agent); assert all(pathlib.Path(m.__file__).is_relative_to(root) for m in modules); print(*(m.__file__ for m in modules), sep="\n")' \
     "$worktree" >"$run_dir/logs/import-paths.log"
 printf '\n实际租用：`CUDA_VISIBLE_DEVICES=%s`，容器只暴露此物理 GPU。\n' "$gpu" >>"$run_dir/README.md"
+printf '%s\n' "$$" >"$run_dir/logs/framework.pid"
+resume_args=()
+if test -f "$run_dir/scripts/resume_run_id"; then
+    resume_args=(--resume "$(cat "$run_dir/scripts/resume_run_id")")
+fi
 
 exec "$python" -c 'from entrypoints.launcher import main; main()' \
     --headless --project "$run_dir/project" --task default \
@@ -37,6 +42,7 @@ exec "$python" -c 'from entrypoints.launcher import main; main()' \
     --outer-loop agent --agent-backend cli --cli-provider copilot \
     --model gpt-6.1-sol --allow-unvetted-model \
     --run-environment docker --interface service --profiler none --local \
+    "${resume_args[@]}" \
     --max-rounds 24 --max-in-flight 1 --evaluation-slots 1 --max-backlog 0 \
-    --constraint "本次是独立盲实验。不得访问其他实验、其他候选仓库、历史 exps 或共享账号的历史会话和记忆；不得借助 Git refs、日志、网络或其他旁路获取这些内容。只使用本次候选仓库、当前任务输入、框架工具以及公开技术资料。" \
+    --constraint "本次是独立盲实验。不得访问其他实验、其他候选仓库、历史 exps 或共享账号的历史会话和记忆；不得借助 Git refs、日志、网络或其他旁路获取这些内容。只使用本次候选仓库、当前任务输入、框架工具以及公开技术资料。只将框架实际提供的工具和能力作为工作前提；不存在的独立 snapshot export/readback 接口不是阻塞条件，使用现有正式评测与候选提交机制完成工作。" \
     >"$run_dir/logs/vibesys.log" 2>&1

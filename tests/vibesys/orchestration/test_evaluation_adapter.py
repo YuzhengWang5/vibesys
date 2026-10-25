@@ -92,7 +92,7 @@ class _BlockingEvaluationSandbox(FakeLifecycleRunner):
 def _write_project(
     root: Path,
     *,
-    accuracy_command: str = "true",
+    accuracy_command: str | tuple[str, ...] = "true",
     benchmark_command: tuple[str, ...] = ("python", "benchmark.py"),
     protocol_row: dict[str, float] | None = None,
 ) -> None:
@@ -135,10 +135,11 @@ def _write_project(
             }
         )
     )
+    accuracy_argv = (accuracy_command,) if isinstance(accuracy_command, str) else accuracy_command
     write_task(
         root,
         'version = 1\n[agent]\ndomain = "generic"\n'
-        f'[accuracy]\ncommand = ["{accuracy_command}"]\n'
+        f"[accuracy]\ncommand = {json.dumps(accuracy_argv)}\n"
         f"[benchmark]\ncommand = {json.dumps(benchmark_command)}\n"
         f"{result_contract}",
         objective="Improve the queue.\n",
@@ -213,6 +214,43 @@ def test_adapter_preserves_failure_feedback(tmp_path: Path) -> None:
         assert not result.passed
         assert result.feedback is not None
         assert result.feedback.startswith("Framework accuracy gate failed.")
+    finally:
+        integration.close()
+
+
+@pytest.mark.parametrize("stage", ["accuracy", "benchmark"])
+def test_failure_feedback_keeps_root_error_before_verbose_service_logs(
+    tmp_path: Path, stage: str
+) -> None:
+    command = (
+        "sh",
+        "-c",
+        "printf 'evaluation-dependency-error\\n'; "
+        'i=0; while test "$i" -lt 1000; do '
+        "printf 'model startup log\\n'; i=$((i+1)); done; "
+        "printf 'service cleanup complete\\n'; exit 1",
+    )
+    project_root = tmp_path / "project"
+    _write_project(
+        project_root,
+        accuracy_command=command if stage == "accuracy" else "true",
+        benchmark_command=command if stage == "benchmark" else ("python", "benchmark.py"),
+    )
+
+    async def body(ctx: CoreHost) -> AccuracyEvaluation | BenchmarkEvaluation:
+        if stage == "accuracy":
+            return await ctx.evaluation.accuracy(ctx.workspaces.root, output=DISCARD)
+        return await ctx.evaluation.benchmark(ctx.workspaces.root, output=DISCARD)
+
+    result, integration = _run_project(project_root, body)
+    try:
+        assert not result.passed
+        assert result.feedback is not None
+        assert "evaluation-dependency-error" in result.feedback
+        assert "service cleanup complete" in result.feedback
+        assert result.operator_feedback is not None
+        assert "evaluation-dependency-error" in result.operator_feedback
+        assert "service cleanup complete" in result.operator_feedback
     finally:
         integration.close()
 

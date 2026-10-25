@@ -1,8 +1,51 @@
 """Public contract tests for diagnostic redaction."""
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
-from vs_redaction.api import DiagnosticRedactor, redact_diagnostic_tail, redact_diagnostic_text
+from vs_redaction.api import (
+    DiagnosticRedactor,
+    redact_diagnostic_excerpt,
+    redact_diagnostic_tail,
+    redact_diagnostic_text,
+)
+
+
+def test_diagnostic_excerpt_preserves_client_error_before_verbose_service_cleanup() -> None:
+    error = "cannot normalize a relative path beyond the base directory"
+    cleanup = "service stopped"
+    text = error + "\n" + "model loading log\n" * 1000 + cleanup
+
+    excerpt = redact_diagnostic_excerpt(text, max_chars=4000)
+
+    assert excerpt.startswith(error)
+    assert excerpt.endswith(cleanup)
+    assert len(excerpt) == 4000
+
+
+@given(text=st.text(), limit=st.integers(min_value=0, max_value=500))
+def test_diagnostic_excerpt_is_bounded_and_preserves_untruncated_text(
+    text: str, limit: int
+) -> None:
+    excerpt = redact_diagnostic_excerpt(text, max_chars=limit)
+    redacted = redact_diagnostic_text(text)
+
+    assert len(excerpt) <= limit
+    if len(redacted) <= limit:
+        assert excerpt == redacted
+
+
+@given(limit=st.integers(min_value=0, max_value=500))
+def test_diagnostic_excerpt_redacts_before_selecting_either_boundary(limit: int) -> None:
+    text = "API_TOKEN=" + "secret-value" * 100 + " suffix"
+
+    assert "secret-value" not in redact_diagnostic_excerpt(text, max_chars=limit)
+
+
+def test_diagnostic_excerpt_rejects_negative_bounds() -> None:
+    with pytest.raises(ValueError, match="max_chars must be non-negative"):
+        redact_diagnostic_excerpt("failure", max_chars=-1)
 
 
 @pytest.mark.parametrize(

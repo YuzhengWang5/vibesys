@@ -23,4 +23,9 @@ trap finish EXIT
 
 gpuctl --cards "$gpu" --owner "qwen3-no-hints-$(basename "$worktree")" \
     --set-cuda-visible-devices -- \
-    bash "$run_dir/scripts/execute.sh" "$worktree" "$run_dir" "$gpu"
+    bash "$run_dir/scripts/execute.sh" "$worktree" "$run_dir" "$gpu" &
+lease_pid=$!
+printf '%s\n' "$lease_pid" >"$run_dir/logs/lease-runner.pid"
+trap 'kill -TERM "$lease_pid"; wait "$lease_pid"; exit 143' TERM
+trap 'kill -INT "$lease_pid"; wait "$lease_pid"; exit 130' INT
+wait "$lease_pid"
