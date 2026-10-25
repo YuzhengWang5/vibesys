@@ -16,7 +16,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.support.real_git import REAL_GIT
 
-from vs_project.api import Git, GitCommandError
+from vs_project.api import CliGitRepository, Git, GitCommandError, NullGitTrackerEvents
 from vs_sim.api import ProcessSpec, ProcessTimeoutError
 from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript
 
@@ -95,6 +95,34 @@ def test_a_command_that_ends_reports_its_exit_and_output(
             text.check()
         assert failure.value.command == ("git", *args)
         assert failure.value.returncode == returncode
+
+
+@pytest.mark.parametrize(
+    "failed_command",
+    [
+        ("ls-files", "--stage", "-z"),
+        ("rev-parse", "--path-format=absolute", "--git-common-dir"),
+    ],
+)
+def test_staging_fails_closed_when_repository_safety_metadata_cannot_be_read(
+    tmp_path: Path, failed_command: tuple[str, ...]
+) -> None:
+    def start(spec: ProcessSpec) -> ProcessScript:
+        command = spec.argv[1:]
+        if command == failed_command:
+            return ProcessScript(returncode=128, stderr=b"cannot read repository metadata")
+        assert command == ("ls-files", "--stage", "-z")
+        return ProcessScript()
+
+    processes = FakeProcesses(start, pass_time=ManualClock().advance)
+    repository = CliGitRepository(tmp_path, git=Git(processes), faults=NullGitTrackerEvents())
+
+    with pytest.raises(GitCommandError) as refused:
+        repository.stage_all(["."])
+
+    assert refused.value.command == ("git", *failed_command)
+    assert refused.value.stderr == "cannot read repository metadata"
+    assert all(spec.argv[1] != "add" for spec in processes.ran)
 
 
 @given(args=_ARGS, survives_kill=st.booleans(), timeout=st.floats(0.1, 30.0))

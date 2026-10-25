@@ -128,9 +128,11 @@ class CliGitRepository:
     def _failure(args: Sequence[str], result: ProcessOutcome) -> GitCommandError:
         return GitCommandError(["git", *args], result.returncode, _text(result.stderr).strip())
 
-    def _run_checked(self, args: Sequence[str]) -> ProcessOutcome:
+    def _run_checked(
+        self, args: Sequence[str], *, index_file: Path | None = None
+    ) -> ProcessOutcome:
         """Run ``git <args>``; a nonzero exit is reported to the fault sink and raised."""
-        result = self._run(args)
+        result = self._run(args, index_file=index_file)
         if result.returncode != 0:
             error = self._failure(args, result)
             self._faults.warning(
@@ -145,20 +147,15 @@ class CliGitRepository:
     ) -> None:
         """Refuse before Git reads ``pathspecs`` of a work tree holding a nested repository.
 
-        See ``_nested_repositories``. An index or a worktree list Git cannot read fails
+        See ``_nested_repositories``. An index or a registration Git cannot read fails
         the guarded command the same way, before it reads the work tree.
         """
-        listing = self._run(_LIST_INDEX, index_file=index_file)
-        worktrees = self._run(["worktree", "list", "--porcelain", "-z"])
+        listing = self._run_checked(_LIST_INDEX, index_file=index_file)
         require_no_nested_repository(
             self._work_tree or self._root,
             pathspecs,
-            gitlinks=_gitlinks(listing.stdout) if listing.returncode == 0 else (),
-            linked_worktrees=(
-                Path(record.removeprefix("worktree "))
-                for record in _text(worktrees.stdout).split("\0")
-                if worktrees.returncode == 0 and record.startswith("worktree ")
-            ),
+            gitlinks=_gitlinks(listing.stdout),
+            linked_worktrees=self._linked_worktree_locations(),
         )
 
     def _prefix(self) -> str:
@@ -537,20 +534,30 @@ class CliGitRepository:
         return _text(result.stdout).strip()
 
     def linked_worktree_location(self, worktree: Path) -> RepositoryLocation:
+        locations = self._linked_worktree_locations()
+        if location := locations.get(worktree.resolve()):
+            return location
+        message = f"fatal: '{worktree}' is not a linked worktree of this repository"
+        raise GitCommandError(["git", "worktree", "list"], 128, message)
+
+    def _linked_worktree_locations(self) -> dict[Path, RepositoryLocation]:
+        """Read host-owned registrations, including on Git without ``worktree list -z``."""
         args = ["rev-parse", "--path-format=absolute", "--git-common-dir"]
         common = Path(_text(self._run_checked(args).stdout).strip())
-        # The pointer path itself, never what an agent-planted ``.git`` symlink names.
-        pointer = worktree.resolve() / ".git"
         registrations = common / "worktrees"
+        locations = {}
         for gitdir in sorted(registrations.iterdir()) if registrations.is_dir() else ():
             back_pointer = gitdir / "gitdir"
             if back_pointer.is_symlink() or not back_pointer.is_file():
                 continue
-            recorded = Path(back_pointer.read_text(encoding="utf-8").strip())
-            if recorded.parent.resolve() / recorded.name == pointer:
-                return RepositoryLocation(git_dir=gitdir.resolve(), work_tree=worktree.resolve())
-        message = f"fatal: '{worktree}' is not a linked worktree of {common}"
-        raise GitCommandError(["git", "worktree", "list"], 128, message)
+            recorded = Path(back_pointer.read_text(encoding="utf-8").removesuffix("\n"))
+            # Resolve the parent, never an agent-planted ``.git`` symlink.
+            work_tree = recorded.parent.resolve()
+            if recorded.name == ".git":
+                locations[work_tree] = RepositoryLocation(
+                    git_dir=gitdir.resolve(), work_tree=work_tree
+                )
+        return locations
 
     # -- repository-local ignore rules ---------------------------------------
 

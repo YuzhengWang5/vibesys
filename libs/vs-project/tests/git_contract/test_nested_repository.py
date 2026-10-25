@@ -121,3 +121,28 @@ def test_a_linked_worktree_inside_the_work_tree_is_not_a_nested_repository(
     assert sandbox.repo.uncommitted_paths(["."]) == ("a.txt",)
     sandbox.repo.stage_all(["."])
     assert sandbox.repo.has_staged_changes()
+
+
+@settings(max_examples=examples(pr=5, nightly=25), deadline=None)
+@given(
+    name=st.sampled_from(["candidate", "with space", 'with"quote', "with\nnewline", "with\\slash"]),
+    kind=st.sampled_from(["directory", "file", "symlink"]),
+)
+def test_registered_worktrees_do_not_exempt_unregistered_siblings(
+    factory: RepositoryFactory, name: str, kind: str
+) -> None:
+    with tempfile.TemporaryDirectory() as scratch:
+        sandbox = ContractProject(root=Path(scratch) / "project", factory=factory)
+        sandbox.root.mkdir()
+        base = sandbox.start({"a.txt": "1\n", ".gitignore": "/state/\n"})
+        candidate = sandbox.root / "state" / name
+        sandbox.repo.add_worktree(candidate, base)
+        location = sandbox.repo.linked_worktree_location(candidate)
+        assert location.work_tree == candidate
+        sandbox.write("a.txt", "edited\n")
+
+        assert sandbox.repo.uncommitted_paths(["."]) == ("a.txt",)
+        _plant(sandbox.root, "state/unregistered/.git", kind)
+        with pytest.raises(NestedRepositoryError) as refused:
+            sandbox.repo.stage_all(["."])
+        assert refused.value.paths == ("state/unregistered/.git",)
