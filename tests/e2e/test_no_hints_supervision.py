@@ -94,3 +94,141 @@ def test_inspector_reads_trusted_outcome_not_process_liveness(tmp_path: Path, ou
 
     assert status["running"] is False
     assert status["terminal"] == terminal
+
+
+@pytest.mark.parametrize("mode", ["restart", "resume"])
+@pytest.mark.parametrize(
+    ("path", "tracked", "accepted_on_resume"),
+    [
+        ("candidate.py", False, False),
+        ("candidate.py", True, False),
+        (".vibesys/state/project.json", False, False),
+        (".vibesys/state/runs/run/run.json", True, False),
+        (".vibesys/state/runs/run/core-store/store.json", False, True),
+        (".vibesys/state/runs/run/artifacts/objects/hash", False, True),
+        (".vibesys/state/runs/run/publications/publications.json", False, True),
+        (".vibesys/state/runs/run/roadmap/roadmap.json", False, True),
+        (".vibesys/state/runs-other/file", False, False),
+        ("file with\nnewline", False, False),
+    ],
+)
+def test_candidate_startup_checks_preserve_resume_state(
+    tmp_path: Path, mode: str, path: str, *, tracked: bool, accepted_on_resume: bool
+) -> None:
+    # Real tier: exercise Git's pathspec and tracked/untracked semantics, not a model of them.
+    def git(*args: str) -> None:
+        run_test_command(
+            ["git", "-C", str(tmp_path), *args],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=HANG_GUARD_S,
+        )
+
+    git("init", "--quiet")
+    target = tmp_path / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("initial\n")
+    if tracked:
+        git("add", "--all")
+        git(
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "--quiet",
+            "-m",
+            "Initial fixture",
+        )
+        target.write_text("changed\n")
+    checker = _INSPECTOR.with_name("check-project.sh")
+    result = run_test_command(
+        ["bash", str(checker), str(tmp_path), mode],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=HANG_GUARD_S,
+    )
+
+    assert (result.returncode == 0) == (mode == "resume" and accepted_on_resume)
+    if result.returncode:
+        assert result.stderr
+
+
+@pytest.mark.parametrize(("mode", "returncode"), [("restart", 0), ("resume", 0), ("other", 2)])
+def test_candidate_startup_checks_clean_repository_and_mode(
+    tmp_path: Path, mode: str, returncode: int
+) -> None:
+    run_test_command(
+        ["git", "-C", str(tmp_path), "init", "--quiet"],
+        capture_output=True,
+        check=True,
+        timeout=HANG_GUARD_S,
+    )
+    result = run_test_command(
+        ["bash", str(_INSPECTOR.with_name("check-project.sh")), str(tmp_path), mode],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=HANG_GUARD_S,
+    )
+
+    assert result.returncode == returncode
+    if returncode:
+        assert mode in result.stderr
+
+
+def test_resume_preparation_reuses_saved_run_id_before_any_events(tmp_path: Path) -> None:
+    worktree = tmp_path / "worktree"
+    scripts = worktree / "support/experiments/qwen3-no-hints"
+    scripts.mkdir(parents=True)
+    (scripts / "fixture.sh").write_text("# fixture\n")
+    project = tmp_path / "experiment/runs/previous/project"
+    project.mkdir(parents=True)
+    previous = project.parent
+    (previous / "scripts").mkdir()
+    (previous / "scripts/resume_run_id").write_text("saved-run\n")
+    for repo in (worktree, project):
+        for args in (
+            ("init", "--quiet"),
+            ("add", "--all"),
+            (
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "--quiet",
+                "--allow-empty",
+                "-m",
+                "Initial fixture",
+            ),
+        ):
+            run_test_command(
+                ["git", "-C", str(repo), *args],
+                capture_output=True,
+                check=True,
+                timeout=HANG_GUARD_S,
+            )
+    result = run_test_command(
+        [
+            "bash",
+            str(_INSPECTOR.with_name("prepare.sh")),
+            str(worktree),
+            str(tmp_path / "experiment"),
+            "5",
+            "resume",
+            str(previous),
+            "",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=HANG_GUARD_S,
+    )
+    prepared = Path(result.stdout.strip())
+
+    assert (prepared / "scripts/resume_run_id").read_text() == "saved-run\n"
+    assert (prepared / "project").resolve() == project
+    assert not (previous / "logs").exists()

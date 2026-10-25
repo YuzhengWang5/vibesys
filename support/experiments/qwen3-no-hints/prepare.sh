@@ -8,6 +8,13 @@ mode=${4:-restart}
 previous=${5:-}
 resume_id=${6:-}
 case "$mode" in restart|resume) ;; *) echo "invalid mode: $mode" >&2; exit 2 ;; esac
+if test "$mode" = resume; then
+    test -n "$previous"
+    if test -z "$resume_id"; then
+        resume_id=$(cat "$previous/scripts/resume_run_id")
+    fi
+    test -n "$resume_id"
+fi
 test -z "$(git -C "$worktree" status --porcelain)"
 commit=$(git -C "$worktree" rev-parse HEAD)
 export GIT_AUTHOR_NAME=wangyuzheng GIT_AUTHOR_EMAIL=yuuzhwang@gmail.com

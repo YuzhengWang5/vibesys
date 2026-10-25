@@ -24,7 +24,11 @@ python=/mnt_ssd/data1/wyz/projects/kb/srcs/vibesys/.venv/bin/python
 test "$(git -C "$worktree" rev-parse HEAD)" = "$(cat "$run_dir/scripts/tested_commit")"
 test -z "$(git -C "$worktree" status --porcelain)"
 cd "$run_dir/project"
-test -z "$(git status --porcelain)"
+mode=restart
+if test -f "$run_dir/scripts/resume_run_id"; then
+    mode=resume
+fi
+bash "$run_dir/scripts/check-project.sh" "$run_dir/project" "$mode"
 nvidia-smi --id="$gpu" --query-gpu=index,uuid,name,memory.used,memory.total \
     --format=csv >"$run_dir/logs/gpu-before.csv"
 "$python" -c 'import pathlib,sys,vibesys,vs_runtime,vs_agent; root=pathlib.Path(sys.argv[1]).resolve(); modules=(vibesys,vs_runtime,vs_agent); assert all(pathlib.Path(m.__file__).is_relative_to(root) for m in modules); print(*(m.__file__ for m in modules), sep="\n")' \
