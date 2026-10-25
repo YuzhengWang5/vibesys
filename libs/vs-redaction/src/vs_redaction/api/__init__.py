@@ -32,4 +32,25 @@ def redact_diagnostic_tail(text: str, *, max_chars: int) -> str:
     return redact_diagnostic_text(text)[-max_chars:]
 
 
-__all__ = ["DiagnosticRedactor", "redact_diagnostic_tail", "redact_diagnostic_text"]
+def redact_diagnostic_excerpt(text: str, *, max_chars: int) -> str:
+    """Redact before bounding, keeping both the initial error and final context."""
+    if max_chars < 0:
+        message = "max_chars must be non-negative"
+        raise ValueError(message)
+    redacted = redact_diagnostic_text(text)
+    if len(redacted) <= max_chars:
+        return redacted
+    separator = "\n[...]\n"
+    available = max_chars - len(separator)
+    if available <= 1:
+        return redacted[:max_chars]
+    tail = available // 2
+    return redacted[: available - tail] + separator + redacted[-tail:]
+
+
+__all__ = [
+    "DiagnosticRedactor",
+    "redact_diagnostic_excerpt",
+    "redact_diagnostic_tail",
+    "redact_diagnostic_text",
+]

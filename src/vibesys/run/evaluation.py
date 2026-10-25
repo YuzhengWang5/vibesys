@@ -17,7 +17,7 @@ from vibesys.events import (
     SubprocessOutputData,
 )
 from vs_core.api import EvidenceKind
-from vs_redaction.api import redact_diagnostic_tail
+from vs_redaction.api import redact_diagnostic_excerpt, redact_diagnostic_tail
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -519,7 +519,8 @@ class _EvaluationAdapter:
             return None
         if result.failure is not None and result.failure.startswith("Model-weight request"):
             return result.failure
-        return f"Framework accuracy gate failed.\n{result.output[-GATE_FEEDBACK_TAIL_CHARS:]}"
+        excerpt = redact_diagnostic_excerpt(result.output, max_chars=GATE_FEEDBACK_TAIL_CHARS)
+        return f"Framework accuracy gate failed.\n{excerpt}"
 
     @staticmethod
     def _operator_accuracy_feedback(result: TrustedAccuracyResult) -> str | None:
@@ -530,9 +531,10 @@ class _EvaluationAdapter:
             "Model-weight request"
         ):
             return result.operator_failure[-GATE_FEEDBACK_TAIL_CHARS:]
-        return (
-            f"Framework accuracy gate failed.\n{result.operator_output[-GATE_FEEDBACK_TAIL_CHARS:]}"
+        excerpt = redact_diagnostic_excerpt(
+            result.operator_output, max_chars=GATE_FEEDBACK_TAIL_CHARS
         )
+        return f"Framework accuracy gate failed.\n{excerpt}"
 
     @staticmethod
     def _interpret_benchmark(
@@ -548,7 +550,10 @@ class _EvaluationAdapter:
                 result.failure_reason or result.failure
                 if not result.executed or provisioning_failure
                 else result.failure_reason
-                or (f"Framework benchmark failed.\n{result.output[-GATE_FEEDBACK_TAIL_CHARS:]}")
+                or (
+                    "Framework benchmark failed.\n"
+                    + redact_diagnostic_excerpt(result.output, max_chars=GATE_FEEDBACK_TAIL_CHARS)
+                )
             )
             if not result.executed or provisioning_failure:
                 operator_feedback = (
@@ -562,7 +567,9 @@ class _EvaluationAdapter:
                     if result.operator_failure_reason is not None
                     else (
                         "Framework benchmark failed.\n"
-                        f"{result.operator_output[-GATE_FEEDBACK_TAIL_CHARS:]}"
+                        + redact_diagnostic_excerpt(
+                            result.operator_output, max_chars=GATE_FEEDBACK_TAIL_CHARS
+                        )
                     )
                 )
             return BenchmarkEvaluation(

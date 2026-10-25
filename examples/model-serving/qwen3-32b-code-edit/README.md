@@ -52,6 +52,13 @@ The `prediction` field uses the OpenAI predicted-outputs format. The server must
 
 ### VibeSys and managed local evaluation
 
+When copying this example into a standalone project, materialize its
+`sdk/vs-bench` path dependency with VibeSys's
+`materialize_input_project` operation before committing the initial project.
+The checkout-relative `../../../sdk/vs-bench` path cannot work at `/workspace`
+inside an independent evaluation container. The evaluator also needs Jinja2
+for the tokenizer's chat template; it is an explicit input dependency.
+
 Implement a foreground `run_server.sh --model-dir /model --port PORT` in the
 candidate project. Mount the target weights read-only at `/model`. The service
 must return HTTP 200 from `/health` only after the real model is ready.

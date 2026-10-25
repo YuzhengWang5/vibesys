@@ -69,6 +69,11 @@ The repository must be its Git root, or outside any Git repository so VibeSys
 can initialize one. An existing repository needs a baseline commit and a clean
 worktree. Keep `agent.toml` and root `.env*` files out of Git history.
 
+Failed accuracy and benchmark feedback preserves both the beginning and end of
+long diagnostic output, with credentials redacted before truncation. This keeps
+an evaluator's initial dependency error visible even when service cleanup prints
+many model-loading messages afterward. Full output remains in subprocess events.
+
 When the selected repository-native task contains a conventional
 `.vibesys/tasks/<task>/Dockerfile`, VibeSys builds it with that task directory
 as the complete build context, on top of the backend's default image (passed

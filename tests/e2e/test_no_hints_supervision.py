@@ -1,0 +1,83 @@
+"""Exercise the external experiment inspector through its shell entry point."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from tests.support import run_test_command
+
+from vs_sim.api.testing import HANG_GUARD_S
+
+_INSPECTOR = Path(__file__).resolve().parents[2] / "support/experiments/qwen3-no-hints/inspect.sh"
+
+
+def _inspect(root: Path, running: str) -> dict[str, object]:
+    result = run_test_command(
+        ["bash", str(_INSPECTOR), str(root), "--now", "12345", "--running", running],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=HANG_GUARD_S,
+    )
+    status = json.loads(result.stdout)
+    assert json.loads((root / "logs/supervisor-health.json").read_text()) == status
+    return status
+
+
+def _events(root: Path, rows: list[dict[str, object]]) -> Path:
+    path = root / "logs/vibesys-state/projects/project/runs/run/logs/core-events.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    return path
+
+
+def test_inspector_ignores_empty_baseline_but_counts_a_real_evaluation_failure(
+    tmp_path: Path,
+) -> None:
+    rows = [
+        {
+            "run_id": "run",
+            "sequence": index,
+            "type": "gate_finished",
+            "status": "failed",
+            "data": {"gate": "accuracy", "output_tail": output},
+        }
+        for index, output in enumerate(
+            [
+                "candidate startup entrypoint is missing: /workspace/run_server.sh",
+                "cannot normalize a relative path beyond the base directory",
+                None,
+            ],
+            start=1,
+        )
+    ]
+    path = _events(tmp_path, rows)
+    with path.open("a") as stream:
+        stream.write('{"type": "partially written')
+
+    status = _inspect(tmp_path, "yes")
+
+    assert status["failure_count"] == 2
+    assert status["running"] is True
+    assert status["terminal"] is None
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure"])
+def test_inspector_reads_trusted_outcome_not_process_liveness(tmp_path: Path, outcome: str) -> None:
+    _events(
+        tmp_path,
+        [{"run_id": "run", "sequence": 1, "type": "run_failed", "status": "failed"}],
+    )
+    publications = tmp_path / "project/.vibesys/state/runs/run/publications/publications.json"
+    publications.parent.mkdir(parents=True)
+    terminal = {"outcome": outcome, "reason": "fixture", "selection": None}
+    publications.write_text(
+        json.dumps({"publications": [{"event": {"kind": "run_ended", "result": terminal}}]})
+    )
+
+    status = _inspect(tmp_path, "no")
+
+    assert status["running"] is False
+    assert status["terminal"] == terminal
