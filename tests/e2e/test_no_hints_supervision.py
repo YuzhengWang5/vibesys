@@ -51,7 +51,7 @@ def _events(root: Path, rows: list[dict[str, object]]) -> Path:
 def test_inspector_ignores_empty_baseline_but_counts_a_real_evaluation_failure(
     tmp_path: Path,
 ) -> None:
-    rows = [
+    rows: list[dict[str, object]] = [
         {
             "run_id": "run",
             "sequence": index,
