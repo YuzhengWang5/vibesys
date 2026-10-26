@@ -96,6 +96,8 @@ PY
 if [[ -f "$SETUP/candidate/REPRODUCTION.md" ]]; then
     rm "$SETUP/candidate/REPRODUCTION.md"
 fi
+bash "$SETUP/scripts/freeze-evaluator.sh" "$SETUP/candidate" \
+    > "$SETUP/logs/freeze-evaluator.log" 2>&1
 git -C "$SETUP/candidate" init --quiet -b "initial-$(basename "$SOURCE")"
 git -C "$SETUP/candidate" config user.name wangyuzheng
 git -C "$SETUP/candidate" config user.email yuuzhwang@gmail.com
@@ -142,6 +144,8 @@ vLLM AR、EAGLE3 基线。硬件为 A100-SXM4-80GB，不是论文 H100。
   15 表示 agent rounds，不等于 plain 模式的性能分析次数。
 - 原始 example 未实现服务。输入沿用原始 checker/benchmark，仅固定 dataset
   revision、携带 vs-bench、补齐 Jinja2 与只读 Transformers reference。
+- vs-bench 在 CPU setup 从原始 vendored source 构建固定 wheel，避免只读任务挂载
+  内触发 setuptools 写入；不改变 evaluator 源码、依赖版本、工作负载或验收门槛。
 - fixture=$SEED_COMMIT；这是未启动 GPU 搜索的输入包，不含 learned candidate。
 - 论文未提供精确 vLLM 版本，此处固定 0.32.0 digest；结果属于迁移复现。
 - 每次尝试独立新建 runs/<timestamp>_<mode>，设备、commit、脚本摘要记录在其中。
