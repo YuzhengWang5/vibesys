@@ -768,8 +768,9 @@ class FakeWorkspace:
         """Return whether this fake can materialize a revision."""
         return self.knows_revision(revision)
 
-    async def matches_revision(self, revision: str) -> bool:
+    async def matches_revision(self, revision: str, *, include_ignored: bool | None = None) -> bool:
         """Return whether the fake tree is exactly the revision's tree."""
+        del include_ignored
         return self._tree_revision == revision
 
     async def find_snapshot(self, label: str) -> str | None:

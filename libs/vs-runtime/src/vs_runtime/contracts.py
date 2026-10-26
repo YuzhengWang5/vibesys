@@ -256,11 +256,12 @@ class Workspace(Protocol):
         """Return whether this run's repository can materialize the revision."""
         ...
 
-    async def matches_revision(self, revision: str) -> bool:
+    async def matches_revision(self, revision: str, *, include_ignored: bool | None = None) -> bool:
         """Return whether the materialized tree equals the revision's tree.
 
         Preserved framework memory is exempt. Ignored files count in a
         runtime-created candidate worktree and are not compared in the root workspace.
+        ``include_ignored`` overrides that default; false compares snapshot source identity.
         """
         ...
 
