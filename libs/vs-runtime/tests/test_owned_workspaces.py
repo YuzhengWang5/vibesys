@@ -116,9 +116,13 @@ class _Resource:
         return RootBaselineDrift()
 
     def matches_revision(
-        self, revision: str, *, exact_keeping: tuple[str, ...] | None = None
+        self,
+        revision: str,
+        *,
+        exact_keeping: tuple[str, ...] | None = None,
+        include_ignored: bool | None = None,
     ) -> bool:
-        del revision, exact_keeping
+        del revision, exact_keeping, include_ignored
         return True
 
     def find_snapshot(self, label: str) -> str | None:

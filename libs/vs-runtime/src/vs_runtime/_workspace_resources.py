@@ -376,19 +376,26 @@ class RuntimeWorkspaceResource:
         return self._root_project.git.has_revision(revision)
 
     def matches_revision(
-        self, revision: str, *, exact_keeping: tuple[str, ...] | None = None
+        self,
+        revision: str,
+        *,
+        exact_keeping: tuple[str, ...] | None = None,
+        include_ignored: bool | None = None,
     ) -> bool:
         """Return whether the workspace tree equals the revision.
 
-        Ignored files count only in a workspace the runtime owns, or when *exact_keeping*
-        is given: then the whole tree counts (an exclusive-root attempt owns what it
-        leaves behind) except the paths it lists, which were there before the run.
-        Preserved memory paths are exempt.
+        By default ignored files count in runtime-owned workspaces or with *exact_keeping*.
+        ``include_ignored=False`` compares snapshot source identity instead, without
+        materializing ignored environments or caches into Git. Preserved memory is exempt.
         """
         return self._project.git.matches_tree(
             revision,
             exempt_paths=(*self._memory_paths, *(exact_keeping or ())),
-            include_ignored=self.owns_checkout or exact_keeping is not None,
+            include_ignored=(
+                self.owns_checkout or exact_keeping is not None
+                if include_ignored is None
+                else include_ignored
+            ),
         )
 
     def unversioned_paths(self) -> tuple[str, ...]:

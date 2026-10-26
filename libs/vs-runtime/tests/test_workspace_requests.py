@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import itertools
 import shutil
+import uuid
 import weakref
 from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
@@ -13,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from tests.support.real_git import REAL_GIT
 from tests.support.session_world import RunningRunInvocations, SettledRunInvocations
@@ -1285,6 +1286,37 @@ def test_candidate_worktree_restore_cleans_ignored_leftovers_exactly(tmp_path: P
         assert (path / "candidate.py").read_text(encoding="utf-8") == "VALUE = 2\n"
 
     with _workspaces(tmp_path) as workspaces:
+        asyncio.run(exercise(workspaces))
+
+
+@settings(
+    max_examples=examples(pr=4, nightly=8),
+    suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+)
+@given(payload=st.binary(min_size=1, max_size=64))
+@example(payload=b"\x00")
+def test_source_identity_does_not_materialize_ignored_environment_files(
+    tmp_path: Path, payload: bytes
+) -> None:
+    async def exercise(workspaces: RuntimeWorkspaces) -> None:
+        _commit_ignore_rules(workspaces.root.path)
+        candidate = await workspaces.create_candidate()
+        revision = candidate.revision
+        assert revision is not None
+        (candidate.path / ".venv").mkdir()
+        (candidate.path / ".venv/dependency.bin").write_bytes(b"ignored dependency:" + payload)
+        blob = _git(candidate.path, "hash-object", ".venv/dependency.bin")
+        assert REAL_GIT.run(["cat-file", "-e", blob], cwd=candidate.path).returncode != 0
+
+        assert await candidate.matches_revision(revision, include_ignored=False)
+        assert REAL_GIT.run(["cat-file", "-e", blob], cwd=candidate.path).returncode != 0
+        assert not await candidate.matches_revision(revision)
+        (candidate.path / "candidate.py").write_text("VALUE = 99\n", encoding="utf-8")
+        assert not await candidate.matches_revision(revision, include_ignored=False)
+
+    root = tmp_path / uuid.uuid4().hex
+    root.mkdir()
+    with _workspaces(root) as workspaces:
         asyncio.run(exercise(workspaces))
 
 
