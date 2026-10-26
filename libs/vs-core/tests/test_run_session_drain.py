@@ -240,6 +240,48 @@ def _settle(executor: Executor) -> None:
     executor.tick(1)
 
 
+@given(sessions=st.integers(1, 4), mode=st.sampled_from(["drain", "cancel"]))
+def test_cleanup_timeouts_do_not_answer_an_accepted_finish(
+    sessions: int, mode: Literal["drain", "cancel"]
+) -> None:
+    state = core.initial_state()
+    state = state.model_copy(
+        update={
+            "run": state.run.model_copy(
+                update={"limits": state.run.limits.model_copy(update={"max_turns": sessions})}
+            )
+        }
+    )
+    executor = Executor(state)
+    for _ in range(sessions):
+        executor.request_turn(reuse=True)
+        for _ in range(2):
+            (request,) = executor.pending()
+            executor.answer(request, core.ObservationStatus.SUCCEEDED, twice=False)
+    executor.stop_decision(mode)
+    result = executor.state.run.result
+    closing = executor.pending()
+    assert len(closing) == sessions
+    assert all(isinstance(request, core.CloseSession) for request in closing)
+    for request in closing:
+        assert request.request_id is not None
+        executor.authorized.add(request.request_id.root)
+        executor.feed(core.DispatchAuthorized(request_id=request.request_id))
+
+    executor.now += executor.state.run.limits.cleanup_bound + 1
+    expired = core.step(executor.state, core.ClockAdvanced(now_at=executor.now))
+    failed = tuple(event for event in expired.events if isinstance(event, core.Failed))
+    assert failed
+    assert {event.decision for event in failed} == {core.DecisionId(root="stop-1")}
+    heard = core.translate(expired.state, expired.events)
+    assert not any(isinstance(event, core.Failed) for event in heard.events)
+    assert {item.failure for item in heard.discarded} == set(failed)
+
+    assert expired.state.run.result == result
+    assert expired.state.run.status == core.RunStatus.CLOSING
+    assert any(isinstance(request, core.InspectRequest) for request in expired.requests)
+
+
 @settings(max_examples=examples(pr=3, nightly=300), deadline=None)
 @example(plan=[("turn", 0, 0)], final_stop=0)  # stop while the session is still being created
 @given(plan=st.lists(actions, min_size=1, max_size=30), final_stop=st.integers(0, 2))

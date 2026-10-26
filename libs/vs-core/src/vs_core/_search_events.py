@@ -46,7 +46,7 @@ from .types.search import (
 from .types.session_inputs import InputDelivered, InputDropped
 from .types.sessions import InterruptCompleted, InterruptFailed, TurnResult, YieldPublicationFailed
 from .types.settlement import AdoptionFailed, AdoptionResult, AttemptSettled
-from .types.strategy import Rejected, RequestTurn
+from .types.strategy import Finish, Rejected, RequestTurn
 from .types.until import Failed, FailureReason
 
 if TYPE_CHECKING:
@@ -154,9 +154,15 @@ def _failed(core: CoreState, event: Failed) -> Event | Discarded:
     One without a decision ended a request core made for itself (a recovery check, a
     release, an inspection). Core owns those: the recovery barrier and the run status
     already react to them, and the shell logs the discard.
+
+    An accepted Finish also owns cleanup requests. Their failure does not reject the
+    proposed result; core keeps draining them without waking the search's Finish.
     """
-    del core
-    if event.decision is None:
+    finishing = any(
+        receipt.decision_id == event.decision and isinstance(receipt.decision, Finish)
+        for receipt in core.run.receipts
+    )
+    if event.decision is None or finishing:
         return Discarded(reason=DiscardReason.INTERNAL_FAILURE, failure=event)
     return event
 
