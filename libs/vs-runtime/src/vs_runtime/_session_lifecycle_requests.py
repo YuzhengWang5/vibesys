@@ -341,13 +341,14 @@ class SessionLifecycleRequests:
                 TurnObserved(
                     invocation=invocation,
                     observation=observation,
-                    output_schema=None if turn is None else turn.output_schema,
-                    output_json=None if turn is None else turn.output_json,
-                ),
+                )
+                if turn is None
+                else turn.model_copy(update={"invocation": invocation, "observation": observation}),
             )
         return ExecutionResult(
             observation=RequestObserved(
                 observation=observation,
+                reply_errors=() if turn is None else turn.reply_errors,
             ),
             owner_events=events,
         )
