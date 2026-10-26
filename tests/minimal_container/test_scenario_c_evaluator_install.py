@@ -39,6 +39,20 @@ def test_frozen_evaluator_installs_with_a_readonly_task(tmp_path: Path, director
     ]
     wheels = list((task / "vendor/wheels").glob("*.whl"))
     assert len(wheels) == 1
+    run_test_command(["git", "init", "--quiet", str(candidate)], check=True, timeout=30)
+    run_test_command(["git", "-C", str(candidate), "add", "."], check=True, timeout=30)
+    run_test_command(
+        [
+            "git",
+            "-C",
+            str(candidate),
+            "ls-files",
+            "--error-unmatch",
+            str(wheels[0].relative_to(candidate)),
+        ],
+        check=True,
+        timeout=30,
+    )
     with ZipFile(wheels[0]) as wheel:
         for source in (vendor / "src/vs_bench").rglob("*.py"):
             assert wheel.read(str(source.relative_to(vendor / "src"))) == source.read_bytes()

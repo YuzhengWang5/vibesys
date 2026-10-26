@@ -6,7 +6,7 @@ VENDOR="$CANDIDATE/.vibesys/tasks/default/vendor"
 test ! -e "$VENDOR/wheels"
 
 # Setuptools writes into its source tree; evaluation mounts the task read-only.
-SOURCE_DATE_EPOCH=315532800 uv build --wheel \
+SOURCE_DATE_EPOCH=315532800 uv build --wheel --no-create-gitignore \
     --out-dir "$VENDOR/wheels" "$VENDOR/vs-bench"
 WHEELS=("$VENDOR/wheels/"*.whl)
 test "${#WHEELS[@]}" -eq 1
