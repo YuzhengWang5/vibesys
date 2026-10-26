@@ -105,9 +105,10 @@ POLICY = AgentEvaluationPolicy(
 
 @dataclass
 class ToolUsingWriter(CandidateWriter):
-    """The Fake provider's implementer: commits, then submits through the tool on turn one."""
+    """The Fake implementer commits and submits through the tool before each wait."""
 
     submissions: int = 1
+    wait_turns: int = 1
     handles: list[str] = field(default_factory=list)
     refusals: list[str] = field(default_factory=list)
     descriptor_env: dict[str, str] = field(default_factory=dict)
@@ -115,9 +116,9 @@ class ToolUsingWriter(CandidateWriter):
     """The in-memory network the bridge listens on and the tool dials."""
 
     def __call__(self, request: AgentTurnRequest) -> None:
-        """Commit one change; the first turn then submits and validates its wait."""
+        """Commit one change, then submit and validate a wait for each waiting turn."""
         super().__call__(request)
-        if self.turns > 1:
+        if self.turns > self.wait_turns:
             self.answer["waiting"] = False
             return
         tools = {
@@ -138,7 +139,7 @@ class ToolUsingWriter(CandidateWriter):
             else:
                 self.handles.append(reply["handle_id"])
         wait = tools[VALIDATE_WAIT_TOOL]
-        wait.handler(wait.input_schema(handles=tuple(self.handles[:1])))
+        wait.handler(wait.input_schema(handles=(self.handles[-1],)))
         self.answer["waiting"] = True
 
 
@@ -174,6 +175,7 @@ async def scenario(
     tmp_path: Path,
     *,
     submissions: int = 1,
+    wait_turns: int = 1,
     timed: tuple[Clock, float] | None = None,
 ) -> AsyncIterator[Scenario]:
     """A run whose implementer submits ``submissions`` times through the tool, then waits."""
@@ -182,7 +184,7 @@ async def scenario(
     bridges: list[AgentEvaluationBridge] = []
 
     def agents(root: Path) -> SessionHost:
-        writer = ToolUsingWriter(root, submissions=submissions)
+        writer = ToolUsingWriter(root, submissions=submissions, wait_turns=wait_turns)
         writers.append(writer)
         resolver = ToolResolver(
             root,
@@ -219,7 +221,7 @@ async def scenario(
 
     with open_skeleton_world(tmp_path, SkeletonStrategy(), agents=agents, timed=timed) as world:
         world.yields = yields
-        world.limits = sample_limits(max_turns=2)
+        world.limits = sample_limits(max_turns=wait_turns + 1)
         yield Scenario(world, writers[0], bridges)
 
 
@@ -239,20 +241,29 @@ async def run(played: Scenario) -> tuple[Process, VirtualClock]:
     return process, clock
 
 
-async def test_an_agent_submits_through_the_tool_and_is_resumed_once(tmp_path: Path) -> None:
-    async with scenario(tmp_path) as played:
+@settings(
+    max_examples=examples(pr=4, nightly=8),
+    suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+)
+@given(wait_turns=st.integers(min_value=1, max_value=4))
+async def test_an_agent_submits_through_the_tool_and_is_resumed_once_per_wait(
+    tmp_path: Path, wait_turns: int
+) -> None:
+    root = tmp_path / uuid.uuid4().hex
+    root.mkdir()
+    async with scenario(root, wait_turns=wait_turns) as played:
         process, _ = await run(played)
         state = process.shell.record.envelope.core
         assert state.run.status == RunStatus.TERMINAL
-        assert len(played.writer.handles) == 1
+        assert len(played.writer.handles) == wait_turns
         assert played.writer.refusals == []
         admitted = [c for c in state.evaluation.agent_calls if c.request_id is not None]
-        assert len(admitted) == 1
-        # Baseline, the agent's submission, and the strategy's own candidate measurement.
-        assert len(played.world.cluster.submissions) == 3
-        assert played.writer.turns == 2
-        assert suspensions(state) == 1
-        assert resumes(state) == 1
+        assert len(admitted) == wait_turns
+        assert suspensions(state) == wait_turns
+        assert resumes(state) == wait_turns
+        assert played.writer.turns == wait_turns + 1, state.run.result
+        # Baseline, each agent submission, and the strategy's own candidate measurement.
+        assert len(played.world.cluster.submissions) == wait_turns + 2
         assert played.bridge[0].unacknowledged() == (), "the client confirmed it read the handle"
 
 
