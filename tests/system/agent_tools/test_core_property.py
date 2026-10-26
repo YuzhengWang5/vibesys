@@ -195,8 +195,9 @@ class Workspace:
         self._refuse_nested()
         return _commit(f"snapshot:{self._edits[-1]}")
 
-    async def matches_revision(self, revision: str) -> bool:
+    async def matches_revision(self, revision: str, *, include_ignored: bool | None = None) -> bool:
         """Whether nothing changed since the snapshot ``revision``."""
+        del include_ignored
         self._refuse_nested()
         return revision == _commit(f"snapshot:{self._edits[-1]}")
 
