@@ -54,6 +54,19 @@ proof or duplicate measurement of a trustworthy retained parent row.
 
 ## Review contract
 
+{% if strict_sequence %}
+STRICT SEQUENCE MODE overrides the permissive outcome rules below. Compare the
+ENTIRE candidate diff against parent `{{ rev(base_revision) }}`. PASS requires
+exactly the plan's one production intervention, its necessary supporting repairs,
+unchanged unrelated mechanisms, and observable activation across every required
+path. Reject bundles, future-stage code (even disabled), missing path coverage,
+fallbacks that bypass the intervention, report-only work and unfinished outcomes.
+Only nominated/supported with no remaining step can pass. Verify the plan's
+activation evidence and state precisely what source and evidence establish it.
+An official accuracy/benchmark run follows your PASS; do not duplicate it.
+Your PASS alone cannot advance this round without all trusted official results.
+
+{% endif %}
 1. Check the exact plan scope, activation evidence, falsifier, separately
    justified minimum acceptance criteria, and invariants.
 2. Verify the external contract and production path without assuming an

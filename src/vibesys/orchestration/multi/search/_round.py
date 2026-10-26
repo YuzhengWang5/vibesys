@@ -122,7 +122,7 @@ async def _play(ctx: Flow, start: MultiRound) -> RoundDone:
     settlement = await work(ctx, start, attempt, planned_by)
     closed = attempt.close(settlement)
     ctx.publish(closed.search)
-    return serial.round_done(
+    done = serial.round_done(
         start,
         closed,
         hypothesis_id=plan.hypothesis_id,
@@ -130,6 +130,13 @@ async def _play(ctx: Flow, start: MultiRound) -> RoundDone:
         passed=serial.round_passed(settlement, attempt),
         metrics=attempt.benchmark_metrics(),
     )
+    if config.strict_sequence:
+        reason = attempt.incomplete_reason()
+        if reason is None and (settlement is None or not serial.round_passed(settlement, attempt)):
+            reason = f"strict_sequence: round {start.number} did not retain an accepted candidate"
+        if reason is not None:
+            return done.model_copy(update={"failure": reason})
+    return done
 
 
 def _advice(ctx: Flow, config: MultiConfig, start: MultiRound) -> serial.Advise:

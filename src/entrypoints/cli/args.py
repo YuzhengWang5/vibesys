@@ -677,6 +677,15 @@ def _build_agent_parser() -> _RunArgumentParser:
         ),
     )
     parser.add_argument(
+        "--strict-sequence",
+        action="store_true",
+        help=(
+            "Multi-agent serial loops only: complete one intervention per round with "
+            "independent review and official gates, build on the last completed round, "
+            "and fail without advancing when the round cannot complete."
+        ),
+    )
+    parser.add_argument(
         "--max-in-flight",
         type=int,
         default=2,

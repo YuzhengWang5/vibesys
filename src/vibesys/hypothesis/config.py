@@ -19,6 +19,7 @@ class HypothesisConfig:
     judge_every: int = 1
     max_retries_per_round: int = 1
     max_continuation_rounds: int = 2
+    strict_sequence: bool = False
 
     def __post_init__(self) -> None:
         """Reject configuration that cannot express a valid schedule."""

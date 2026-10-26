@@ -46,6 +46,7 @@ class _Plan(PlanEvidence, RolePromptContext):
     reply_schema: ClassVar[SchemaRef | None] = ORCHESTRATOR.reply_schema
 
     base_revision: RevisionRef
+    strict_sequence: bool = False
     problem: str | None = None
     """Why the earlier plan was not accepted; None for the first request."""
 
@@ -90,6 +91,7 @@ def plan_prompt(  # noqa: PLR0913  # LW-641208 [PLR0913]; the request is built f
     return PlanPrompt(
         **{name: getattr(evidence, name) for name in PlanEvidence.model_fields},
         base_revision=start.base,
+        strict_sequence=hypotheses.strict_sequence,
     )
 
 
@@ -114,4 +116,10 @@ def _passed(start: RoundStart, ledger: rounds.Ledger) -> tuple[PassedIdea, ...]:
 def correction_of(prompt: PlanPrompt, of: InvocationRef, problem: str) -> PlanCorrection:
     """``prompt`` asked again as the correction of the turn ``of``, which ``problem`` names."""
     fields = {name: getattr(prompt, name) for name in PlanEvidence.model_fields}
-    return PlanCorrection(**fields, base_revision=prompt.base_revision, of=of, problem=problem)
+    return PlanCorrection(
+        **fields,
+        base_revision=prompt.base_revision,
+        strict_sequence=prompt.strict_sequence,
+        of=of,
+        problem=problem,
+    )

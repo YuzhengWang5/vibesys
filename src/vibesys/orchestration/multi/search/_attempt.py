@@ -208,6 +208,8 @@ class MultiAttempt:
             pareto_archive_conflict=self.conflict,
             benchmark_enabled="benchmark" in self.terms.measured,
             active_component=None if focus is None else (focus.active_component or None),
+            strict_sequence=self.config.strict_sequence,
+            paid_turns=self.config.max_retries_per_round,
         )
 
     def judge_prompt(self, cited: tuple[EvidenceRef, ...]) -> JudgePrompt:
@@ -224,6 +226,8 @@ class MultiAttempt:
             pareto_archive_conflict=self.conflict,
             benchmark_enabled="benchmark" in self.terms.measured,
             cited_evidence=cited,
+            strict_sequence=self.config.strict_sequence,
+            base_revision=self.base,
         )
 
     # -- what the implementer's turn came to -------------------------------------------------
@@ -235,6 +239,7 @@ class MultiAttempt:
         self.judge_invocation = None
         self.review_skipped = False
         self.official_reason = None
+        self.passed = False
 
     def no_reply(self, reason: str) -> Next:
         """The turn produced no valid reply: it is asked again while paid turns remain."""
@@ -260,6 +265,18 @@ class MultiAttempt:
         self.feedback = None
         self.conflict = None
         self.validation_failure = None
+        if self.config.strict_sequence and (
+            reply.hypothesis_outcome
+            not in {HypothesisOutcome.NOMINATED, HypothesisOutcome.SUPPORTED}
+            or reply.next_step.strip()
+            or reply.candidate_disposition is CandidateDisposition.DISCARD
+        ):
+            self.feedback = (
+                "strict_sequence: the intervention is unfinished or discarded; repair only "
+                "this plan inside this round, then nominate a complete active candidate "
+                "with no remaining next_step; the paid-turn budget will not reset"
+            )
+            return Next.AGAIN
         hypotheses = self.config.hypotheses
         if self.candidate is None and reviewed.candidate_ready(reply):
             self.ledger = rounds.note_attempt_failure(
@@ -324,6 +341,8 @@ class MultiAttempt:
     def validated(self, report: LocalValidationReport | None) -> Next:
         """Fold the recipes' trusted run: a failure is feedback for another attempt."""
         if report is None or report.status != "succeeded":
+            if self.config.strict_sequence:
+                return self.failed("strict_sequence: infrastructure could not run local validation")
             # The run could not be validated (nothing to blame on the candidate): approve it on
             # the judge's verdict, as a run that does not offer validation does.
             return self._approve()
@@ -348,6 +367,12 @@ class MultiAttempt:
         reply = self.response
         if reply is None:
             return Next.SETTLE
+        if self.config.strict_sequence and (
+            "benchmark" not in self.terms.measured or self.candidate is None
+        ):
+            return self.failed(
+                "strict_sequence requires a retained candidate and official benchmark"
+            )
         hypotheses = self.config.hypotheses
         ledger = reviewed.approve_candidate(hypotheses, self.ledger, reply)
         reason = rounds.official_reason(candidate_ready=reviewed.candidate_ready(reply))
@@ -366,6 +391,10 @@ class MultiAttempt:
             case serial.Gated(readings=readings):
                 self.readings = readings
                 feedback = serial.failed_gate(readings)
+                if feedback is None and self.config.strict_sequence:
+                    incomplete = self._incomplete_evidence()
+                    if incomplete is not None:
+                        return self.failed(incomplete)
                 if feedback is None:
                     self.passed = True
                     return Next.SETTLE
@@ -379,6 +408,25 @@ class MultiAttempt:
                 return Next.SETTLE
             case serial.Unreadable(reason=reason):
                 return self.failed(reason)
+
+    def _incomplete_evidence(self) -> str | None:
+        """Require trusted stage results, not agent metrics or an arbitrary decoder stage label."""
+        stages = {reading.stage for reading in self.readings if reading.passed}
+        accuracy = self.terms.accuracy_stage
+        if accuracy is not None:
+            stages.discard(accuracy)
+            if serial.accuracy_passed(self.readings):
+                stages.add(accuracy)
+        benchmark = reading_of(self.readings, EvidenceKind.BENCHMARK)
+        if benchmark is not None and benchmark.passed:
+            stages.add("benchmark")
+        missing = set(self.terms.measured) - stages
+        if missing or benchmark is None or benchmark.headline() is None:
+            return (
+                "strict_sequence: official evidence is incomplete "
+                f"(missing stages: {sorted(missing)}, benchmark metric required)"
+            )
+        return None
 
     def _gate_failed(self, feedback: str) -> None:
         """A trusted gate rejected the candidate: another attempt may repair it."""
@@ -430,9 +478,29 @@ class MultiAttempt:
         revision, assessment = serial.settle(
             self.finished(), baseline=self.baseline, terms=self.terms, unsettled=UNSETTLED
         )
-        if assessment.eligible and self.judge_pass is not True:
+        if assessment.eligible and (
+            self.judge_pass is not True or (self.config.strict_sequence and not self.passed)
+        ):
             assessment = assessment.model_copy(update={"eligible": False})
         return revision, assessment
+
+    def incomplete_reason(self) -> str | None:
+        """Why strict sequencing cannot advance; None only after complete trusted acceptance."""
+        if not self.config.strict_sequence:
+            return None
+        if self.passed and self.judge_pass is True and self.failure is None:
+            return None
+        detail = (
+            self.failure
+            or self.feedback
+            or self.no_valid_reply
+            or "no complete independently reviewed official result"
+        )
+        return (
+            f"strict_sequence: round {self.number}, hypothesis {self.plan.hypothesis_id}, "
+            f"incomplete after {self.turns}/{self.config.max_retries_per_round} paid turns: "
+            f"{detail}"
+        )
 
     def judge_outcome(self) -> JudgeOutcome:
         """The round's review as the ledger records it."""

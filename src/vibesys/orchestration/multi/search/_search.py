@@ -28,6 +28,11 @@ async def multi(ctx: Flow, config: MultiConfig) -> NoWinner | None:
     async with ctx.group(limit=1) as rounds:
         while not run.over(stopping=ctx.stop_requested):
             begin = run.start()
+            if config.strict_sequence and (passed := begin.passed_ideas()):
+                parent = passed[-1]
+                begin = begin.model_copy(
+                    update={"base": parent.revision, "best_round": parent.round_number}
+                )
             task = rounds.start(f"{begin.number:06d}", play_round, MultiRound.of(begin, config))
             match await ctx.first(rounds, ctx.stopped):
                 case RoundDone() as done:
@@ -38,4 +43,6 @@ async def multi(ctx: Flow, config: MultiConfig) -> NoWinner | None:
                 case StopRequested():
                     pass  # the group has stopped the round
             ctx.publish(run.snapshot())
+    if config.strict_sequence and run.failure is not None:
+        return NoWinner(reason=run.failure)
     return run.ending()

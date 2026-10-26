@@ -2,13 +2,15 @@ Maximize **single-batch end-to-end completion throughput** (median completion to
 
 **Headline metric**: `median_tok_per_sec` from `.vibesys/tasks/default/benchmark/benchmark.py`'s JSON output ("Primary metric: median_tok_per_sec = ..."). Single-batch (concurrency 1), tokens counted by re-tokenizing the concatenated server response. This is the only number `perf_metric` should record.
 
-## Prompt-only experiment: one optimization at a time
+## Strict sequential experiment: one completed intervention per round
 
-The experiment tests whether task instructions alone can make the designer,
-implementer and judge maintain one optimization mechanism per hypothesis and
-candidate. These sequencing rules are **not enforced by new framework code**.
-Follow them explicitly in the existing plan, implementation, review and result
-fields; do not add new reply-schema fields or change framework policy.
+This experiment uses the framework's `strict_sequence` mode. Each round owns
+one fixed intervention, including all necessary narrow repairs. The framework
+bounds implementer turns inside that round, requires independent review and
+complete official measurements, fixes the next parent to the last completed
+round, and stops on failure rather than skipping to another intervention.
+The judge must independently audit the whole parent-to-candidate diff and
+production activation; semantic single-mechanism scope is not a mechanical proof.
 
 For this task, the staged requirements below take precedence over serving-skills
 recommendations that CUDA Graphs or fused FlashInfer attention must be present
@@ -21,10 +23,10 @@ because it has no FlashInfer.
 
 ### Mandatory sequence
 
-Complete or explicitly close each stage before proposing the next. A stage may
-need several rounds of narrow repairs, but one round must not implement or
-measure two stages. The first successful service is a prerequisite baseline,
-not a bundle of the three optimizations.
+Complete each stage before proposing the next. One stage occupies exactly one
+round, with bounded narrow repairs inside that same round. A stage that cannot
+complete ends the sequence as failed; do not close it and skip ahead. The first
+successful service is a prerequisite baseline, not a bundle of optimizations.
 
 | Stage | Single intervention | Required production path | Still forbidden |
 | --- | --- | --- | --- |
@@ -99,16 +101,22 @@ round | stage | parent revision | single intervention | submitted revision
       | keep/reject/blocked | next stage or narrow repair
 ```
 
-Advance only after the current stage has a recorded official outcome, or after
-a concrete implementation/validation blocker has been explicitly closed under
-the existing retry budget. Do not repeatedly submit an unchanged failing
-candidate or revalidate an unchanged diagnostic result as new optimization.
-On failure or no defensible gain, preserve the trusted incumbent and report
-what was not established. If a stage is closed without adoption, later stages
-start from that incumbent, must disclose the absent feature, and must not
-quietly reintroduce it together with another intervention. A final version
-without working prediction-driven verification is a partial experiment, not
-completion of the eventual predicted-outputs objective.
+Advance only after the complete required production path is active, independent
+full-diff review passes, and official accuracy and benchmark measurements pass
+for that exact revision. Do not repeatedly submit an unchanged failing candidate
+without a concrete new repair. A disabled feature, a partial path, local-only
+evidence or a report-only diagnosis cannot complete the round. If bounded
+repairs cannot establish these facts, report failure honestly and stop; do not
+switch mechanisms or import a future stage to escape the blocker.
+
+For this experiment, completion means correct active implementation plus a
+trusted throughput measurement, not a guaranteed speedup. Record regressions
+and uncertain deltas honestly. Each next stage inherits the immediately prior
+completed implementation, even if an older completed version is faster.
+The framework may retain an older best candidate as the performance winner;
+that does not make an incomplete sequence successful. S2 requires the full
+prefill/decode/verify path stated above, not merely a partial graph. S3 requires
+the actual FlashInfer path, not an unused dependency or a disabled wrapper.
 
 Do not obtain implementations, plans, results or conversations from another
 experiment. Use only this task's public inputs and this run's own evidence.

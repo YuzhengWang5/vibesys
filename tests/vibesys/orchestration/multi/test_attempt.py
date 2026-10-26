@@ -254,6 +254,30 @@ def test_a_failed_attempt_is_never_eligible() -> None:
     assert not assessment.eligible
 
 
+@given(
+    outcome=st.sampled_from(
+        ["continue", "blocked", "disproven", "implementation_failed", "inconclusive"]
+    )
+)
+def test_strict_unfinished_outcomes_cannot_finish_a_round(outcome: str) -> None:
+    taken = attempt(config=config(strict_sequence=True, max_retries_per_round=8))
+    assert taken.replied(implemented(outcome), CANDIDATE) is Next.AGAIN
+    assert taken.incomplete_reason() is not None
+    assert taken.prompt().strict_sequence
+    assert taken.prompt().paid_turns == 8
+    assert taken.config.hypotheses.max_continuation_rounds == 0
+
+
+@given(gates=st.lists(st.sampled_from(PASSING_GATES.readings), max_size=3))
+def test_strict_missing_metric_or_stage_cannot_complete(gates: list[AcceptedReading]) -> None:
+    taken = attempt(config=config(strict_sequence=True))
+    taken.replied(implemented(), CANDIDATE)
+    taken.judged(reviewed(), JUDGE_TURN)
+    assert taken.gated(Gated(readings=tuple(gates))) is Next.SETTLE
+    assert taken.incomplete_reason() is not None
+    assert not taken.asserted()[1].eligible
+
+
 # -- when a review is asked ------------------------------------------------------------------
 
 

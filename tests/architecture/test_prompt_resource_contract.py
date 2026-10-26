@@ -274,6 +274,7 @@ def representative_context() -> dict[str, object]:
         "max_issues_per_perf_eval",
         "nodes",
         "num_failed_attempts",
+        "paid_turns",
         "remaining",
         "retry",
         "round_number",
@@ -297,6 +298,7 @@ def representative_context() -> dict[str, object]:
         "repair_seed",
         "require_unseen_id",
         "searched",
+        "strict_sequence",
     ]:
         context[name] = False
     for name in [

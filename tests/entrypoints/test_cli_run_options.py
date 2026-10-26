@@ -248,6 +248,33 @@ def _parse(argv: list[str]) -> Namespace:
     return cli.parse_cli_invocation(argv).args
 
 
+def test_strict_sequence_is_an_explicit_multi_agent_option(tmp_path: Path) -> None:
+    args = _parse(_argv(tmp_path, "--strict-sequence", "--max-retries-per-round", "8"))
+    assert args.strict_sequence is True
+    assert args.max_retries_per_round == 8
+    report = preflight_report(
+        _argv(
+            tmp_path / "preflight", "--strict-sequence", "--backend", "cpu", "--profiler", "none"
+        ),
+        _parse,
+        ScriptedProbe(lambda _argv: None),
+    )
+    assert isinstance(report.settings, SettingsValid)
+
+
+@pytest.mark.parametrize("flags", [["--inner-loop", "single-agent"], ["--outer-loop", "dynamic"]])
+def test_strict_sequence_is_not_silently_ignored_by_another_policy(
+    tmp_path: Path, flags: list[str]
+) -> None:
+    report = preflight_report(
+        _argv(tmp_path, "--strict-sequence", "--backend", "cpu", "--profiler", "none", *flags),
+        _parse,
+        ScriptedProbe(lambda _argv: None),
+    )
+    assert isinstance(report.settings, SettingsInvalid)
+    assert "--strict-sequence requires" in report.settings.message
+
+
 @pytest.mark.parametrize(
     "answer",
     [None, ProbeResult(0, ""), ProbeResult(9, "", "NVIDIA-SMI has failed"), ProbeResult(0, "junk")],

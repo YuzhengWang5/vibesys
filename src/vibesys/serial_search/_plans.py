@@ -60,6 +60,23 @@ def _check(
         raise InvalidPlanError.self_reference()
     if ledger.search.by_id(plan.hypothesis_id) is not None:
         raise InvalidPlanError.reused_id(plan.hypothesis_id)
+    if config.strict_sequence:
+        parent = start.best_round or 0
+        if plan.base_round not in (None, parent):
+            message = f"strict_sequence requires base_round {parent}, the sequential parent"
+            raise InvalidPlanError(message)
+        for name in (
+            "hypothesis",
+            "task",
+            "pass_criteria",
+            "invariants",
+            "activation_evidence",
+            "falsification_criteria",
+            "minimum_acceptance_criteria",
+        ):
+            if not getattr(plan, name).strip():
+                message = f"strict_sequence requires nonblank {name} for one concrete intervention"
+                raise InvalidPlanError(message)
     _check_base(plan, ledger, start)
     rounds.validate_plan(config, ledger, plan.hypothesis_updates)
 

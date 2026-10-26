@@ -39,7 +39,11 @@ tests, or launch benchmarks.
 {% else %}
 - No idea has passed yet.
 {% endif %}
+{% if strict_sequence %}
+- Strict sequential parent: `{{ rev(base_revision) }}`. Omit {{ reply.base_round }} or name the immediately preceding completed idea. Older ideas and the input are not alternative parents after round 1.
+{% else %}
 - Base: this idea starts from {% if bests %}the current best, idea {{ bests[0].round_number }}{% else %}the input, which no passed idea has beaten{% endif %}, unless {{ reply.base_round }} names another base: a passed idea's number, or 0 for the input. A failed idea cannot be a base.
+{% endif %}
 {% if frontier %}
 - Pareto frontier (trusted parents, noise-aware):
 {% for row in frontier %}
@@ -62,6 +66,24 @@ earlier revisions; search older work only when it can change the decision.
 
 ## Decision contract
 
+{% if strict_sequence %}
+STRICT SEQUENCE MODE takes precedence over exploration and retention advice below.
+Design exactly one concrete production intervention, following the task's mandatory
+order. The initial runnable control is the only bootstrap exception. Do not choose
+a report-only, profiling-only, tuning-sweep or bundled implementation round.
+Fill {{ reply.hypothesis }}, {{ reply.task }}, {{ reply.pass_criteria }},
+{{ reply.invariants }}, {{ reply.activation_evidence }},
+{{ reply.falsification_criteria }} and {{ reply.minimum_acceptance_criteria }}
+with nonblank, testable requirements. Name the one changed mechanism, the exact
+parent revision, full required production-path coverage and all fixed mechanisms.
+The implementer gets bounded repairs inside this round; it cannot defer completion
+to another round. Only independent full-diff/activation review and all official
+gates allow advancement. Exhaustion or unavailable evidence stops the run with
+an explicit failure; a failed stage cannot be closed and skipped. A measured
+regression is not a speedup. Do not promise that finite retries guarantee a gain.
+The parent is fixed even if an older completed candidate is faster.
+
+{% endif %}
 Keep separate: (1) hard feasibility under every declared constraint and trusted
 gate; (2) variance-aware Pareto retention of any feasible nondominated tradeoff;
 and (3) terminal completion by one point satisfying every objective at once.
@@ -71,10 +93,12 @@ minimum from noise, cost, complexity, and allowed tradeoffs. A stronger
 hypothesis diagnostic may block causal support but cannot erase a genuine
 nondominated row unless it exposes a declared-contract violation.
 
+{% if not strict_sequence %}
 Choose the base whose gap matches the mechanism: the current best by default, or set
 {{ reply.base_round }} to build on another passed idea or the input; the framework
 provides that code and preserves memory. Reuse trustworthy retained controls; remeasure only
 for concrete drift.
+{% endif %}
 
 Profiler findings and suggestions are advisory, not prerequisites. Missing or
 uncalibrated capture is uncertainty, not evidence that optimization must stop.

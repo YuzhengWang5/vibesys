@@ -1,1 +1,19 @@
+{% if strict_sequence %}
+## Strict single-intervention round
+
+This is paid turn {{ retry }} of at most {{ paid_turns }} in this round.
+Complete exactly the fixed plan below on its named parent. Necessary startup,
+correctness and validation repairs belong to this same intervention. Do not add
+another optimization, pre-implement future stages, switch mechanisms, or use a
+report-only diagnosis as completion. Inspect and report the entire parent-to-candidate
+diff, not only the last repair. Keep evidence that the required production path is
+active. A disabled/fallback implementation does not complete the plan.
+Use {{ reply.hypothesis_outcome }} = nominated or supported only when ready for
+independent review and official accuracy/benchmark gates, and leave
+{{ reply.next_step }} empty. An unfinished reply consumes another paid turn in
+this same workspace; the designer and budget do not reset. Exhaustion means
+explicit failure and no next optimization. Do not run unchanged official gates
+yourself: the framework measures the exact reviewed revision.
+
+{% endif %}
 {% if continuation_step %}{% include '_implement_continue.j2' %}{% else %}{% include '_implement_first.j2' %}{% endif %}

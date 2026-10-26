@@ -238,6 +238,9 @@ def _validate_plain(args: argparse.Namespace) -> None:
 def _agent_policy_descriptor(
     args: argparse.Namespace, bundle: InputBundle
 ) -> OrchestrationDescriptor:
+    if args.strict_sequence and (args.outer_loop == "dynamic" or args.inner_loop != "multi-agent"):
+        message = "--strict-sequence requires a serial --inner-loop multi-agent"
+        _cause_error(ArgumentsRejected(message))
     if args.outer_loop == "dynamic":
         orchestration_id = "dynamic"
     elif args.outer_loop == "agent":
@@ -286,7 +289,11 @@ def _agent_policy_descriptor(
             **task,
             "max_rounds": args.max_rounds,
             "max_retries_per_round": args.max_retries_per_round,
-            **({"judge_every": args.judge_every} if args.inner_loop == "multi-agent" else {}),
+            **(
+                {"judge_every": args.judge_every, "strict_sequence": args.strict_sequence}
+                if args.inner_loop == "multi-agent"
+                else {}
+            ),
         }
     return OrchestrationDescriptor(id=orchestration_id, config_version=1, options=options)
 

@@ -5,6 +5,12 @@ SOURCE="$(realpath "$1")"
 EXP="$(realpath "$2")"
 SETUP_ID="${3:-20261020_152200_setup}"
 OUTER_LOOP="${4:-plain}"
+SEQUENCE="${5:-default}"
+[[ "$SEQUENCE" =~ ^(default|strict-pilot|strict)$ ]]
+if [[ "$SEQUENCE" != default && "$OUTER_LOOP" != agent ]]; then
+    echo "strict sequence requires the agent outer loop" >&2
+    exit 2
+fi
 if [[ "$OUTER_LOOP" != plain && "$OUTER_LOOP" != agent ]]; then
     echo "unsupported outer loop: $OUTER_LOOP (expected plain or agent)" >&2
     exit 2
@@ -46,7 +52,22 @@ test -f "$SOURCE/support/scenario-c-repro/copilot-sol.toml"
 mkdir -p "$SETUP/scripts" "$SETUP/logs" "$SETUP/plots"
 cp "$SOURCE/support/scenario-c-repro/"* "$SETUP/scripts/"
 cp "$SOURCE/scripts/scenario_c_pilot.py" "$SETUP/scripts/scenario_c_pilot.py"
+cp "$SOURCE/scripts/scenario_c_sequence.py" "$SETUP/scripts/scenario_c_sequence.py"
 printf '%s\n' "$OUTER_LOOP" > "$SETUP/scripts/outer-loop.txt"
+python - "$SETUP/scripts/search-options.json" "$SEQUENCE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+strict = sys.argv[2] != "default"
+Path(sys.argv[1]).write_text(json.dumps({
+    "strict_sequence": strict,
+    "max_rounds": 2 if sys.argv[2] == "strict-pilot" else 15,
+    "max_retries_per_round": 8 if strict else 3,
+    "judge_every": 1 if strict else 3,
+    "max_run_seconds": 21600 if sys.argv[2] == "strict-pilot" else 43200,
+}, indent=2) + "\n")
+PY
 mkdir "$SETUP/candidate"
 git -C "$SEED" archive "$SEED_COMMIT" | tar -x -C "$SETUP/candidate"
 cp "$REFERENCE" "$SETUP/candidate/.vibesys/tasks/default/reference/reference.py"
@@ -116,6 +137,7 @@ vLLM AR、EAGLE3 基线。硬件为 A100-SXM4-80GB，不是论文 H100。
   Docker 容器及随机模型对话；没有从其他实验候选生成的 seed。
 - 共享：固定 revision 的公共权重，只读挂载；不共享生成的程序、建议或结果。
 - 控制流：AR → EAGLE3 → $OUTER_LOOP；预算 max-rounds=15。
+- 顺序模式：$SEQUENCE；实际预算以 setup/scripts/search-options.json 为准。
 - agent 模式为 multi-agent / service，包含 designer、implementer、judge；
   15 表示 agent rounds，不等于 plain 模式的性能分析次数。
 - 原始 example 未实现服务。输入沿用原始 checker/benchmark，仅固定 dataset
@@ -150,6 +172,8 @@ cat > "$SETUP/README.md" <<EOF
 - seed_kind=$SEED_KIND；seed_repository=$SEED；seed_commit=$SEED_COMMIT。
 - 模型：Copilot $AGENT_MODEL，high；目标权重位于 /mnt_ssd/data1/models。
 - outer_loop=$OUTER_LOOP；选择已固定在 scripts/outer-loop.txt，运行阶段不读取模式环境变量。
+- sequence=$SEQUENCE；严格模式轮内最多 8 次实现机会，试跑 2 轮，正式最多 15 轮；
+  阶段失败就停止，不作为框架故障重试；框架故障修复后必须新建 run。
 - setup 仅为 CPU 准备，不产生性能数据。GPU 任务必须经 gpuctl 启动。
 EOF
 printf '# 准备结果\n\n输入校验通过；尚未进行 GPU 性能测量。\n\n建议：保留公共输入 pin 和控制脚本。\n' > "$SETUP/summary.md"

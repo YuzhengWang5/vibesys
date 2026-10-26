@@ -111,6 +111,8 @@ _IMPLEMENT = st.builds(
     benchmark_enabled=st.booleans(),
     active_component=st.none() | _TEXT,
     continuation_step=st.none() | _TEXT,
+    strict_sequence=st.booleans(),
+    paid_turns=st.integers(3, 8),
     **_REPAIR,
 )
 _CLAIMS = st.builds(
@@ -133,6 +135,8 @@ _JUDGE = st.builds(
     framework=_GATES,
     pareto_archive_conflict=_CONFLICT,
     benchmark_enabled=st.booleans(),
+    strict_sequence=st.booleans(),
+    base_revision=_REVISIONS,
 )
 _PRE_ROUND = st.builds(
     PreRoundPrompt,
@@ -153,6 +157,7 @@ _PLANNING = st.builds(
     round_number=st.integers(1, 5),
     max_rounds=st.integers(5, 9),
     base_revision=_REVISIONS,
+    strict_sequence=st.booleans(),
     last_profile=st.none()
     | st.builds(
         LastProfile,

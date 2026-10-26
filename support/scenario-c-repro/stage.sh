@@ -18,6 +18,17 @@ mkdir "$RUN"
 mkdir "$RUN/scripts" "$RUN/logs" "$RUN/plots"
 cp "$SETUP/scripts/"* "$RUN/scripts/"
 OUTER_LOOP="$(< "$RUN/scripts/outer-loop.txt")"
+read -r MAX_ROUNDS MAX_RETRIES JUDGE_EVERY STRICT MAX_SECONDS < <(
+    python - "$RUN/scripts/search-options.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text())
+print(data["max_rounds"], data["max_retries_per_round"], data["judge_every"],
+      int(data["strict_sequence"]), data["max_run_seconds"])
+PY
+)
 if [[ "$OUTER_LOOP" != plain && "$OUTER_LOOP" != agent ]]; then
     echo "unsupported outer loop: $OUTER_LOOP (expected plain or agent)" >&2
     exit 2
@@ -112,9 +123,10 @@ cat > "$RUN/README.md" <<EOF
 - tested_commit=$ENGINE_COMMIT；agentshim=$SHIM_COMMIT。
 - candidate=$CANDIDATE；initial_commit=$CANDIDATE_COMMIT。
 - agent=Copilot CLI；model=$AGENT_MODEL；reasoning=high；独立 HOME=$HOME。
-- optimize：outer-loop=$OUTER_LOOP，max-rounds=15，无跨实验状态。
-- agent：inner-loop=multi-agent，interface=service，judge-every=3，
-  max-retries-per-round=3；独立 designer / implementer / judge。
+- optimize：outer-loop=$OUTER_LOOP，max-rounds=$MAX_ROUNDS，无跨实验状态。
+- agent：inner-loop=multi-agent，interface=service，judge-every=$JUDGE_EVERY，
+  max-retries-per-round=$MAX_RETRIES；strict_sequence=$STRICT；max_run_seconds=$MAX_SECONDS。
+- 严格模式：同轮修复、完整正式验收才推进，失败停止；单机制与激活由独立 judge 审查。
 - plain：issue-tracker local；15 轮指性能分析上限，不与 agent rounds 混用。
 - baseline：vLLM 0.32.0；$IMAGE。
 - 单 GPU bf16；memory-utilization=0.95；max-model-len=4096；EAGLE3 K=7。
@@ -163,18 +175,32 @@ if [[ "$MODE" == pilot ]]; then
     wait "$CHILD"
     CHILD=""
 elif [[ "$MODE" == optimize ]]; then
+    if [[ "$STRICT" == 1 ]]; then
+        python "$RUN/scripts/scenario_c_sequence.py" \
+            --project "$CANDIDATE" --run-id "$VS_RUN_ID" \
+            --config "$RUN/scripts/copilot-sol.toml" \
+            --options "$RUN/scripts/search-options.json" --logs "$RUN/logs" &
+        CHILD=$!
+        wait "$CHILD"
+        CHILD=""
+    else
     LOOP_ARGS=(--tracker-backend local)
     if [[ "$OUTER_LOOP" == agent ]]; then
         LOOP_ARGS=(--inner-loop multi-agent --interface service \
-            --max-retries-per-round 3 --judge-every 3)
+            --max-retries-per-round "$MAX_RETRIES" --judge-every "$JUDGE_EVERY")
+        if [[ "$STRICT" == 1 ]]; then
+            LOOP_ARGS+=(--strict-sequence)
+        fi
     fi
     vibesys --headless --outer-loop "$OUTER_LOOP" --project "$CANDIDATE" --task default \
         --config "$RUN/scripts/copilot-sol.toml" --agent-backend cli --cli-provider copilot \
         --model "$AGENT_MODEL" --allow-unvetted-model --backend cuda \
-        --max-rounds 15 "${LOOP_ARGS[@]}" --run-id "$VS_RUN_ID" &
+        --max-rounds "$MAX_ROUNDS" --max-run-seconds "$MAX_SECONDS" \
+        "${LOOP_ARGS[@]}" --run-id "$VS_RUN_ID" &
     CHILD=$!
     wait "$CHILD"
     CHILD=""
+    fi
 else
     EXTRA=()
     if [[ "$MODE" == eagle3 ]]; then

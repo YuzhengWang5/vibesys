@@ -161,6 +161,8 @@ class ImplementPrompt(RolePromptContext):
     pareto_archive_conflict: ArchiveConflictView | None = None
     benchmark_enabled: bool = True
     active_component: str | None = None
+    strict_sequence: bool = False
+    paid_turns: int = Field(default=1, ge=1)
 
 
 class JudgePrompt(RolePromptContext):
@@ -181,6 +183,8 @@ class JudgePrompt(RolePromptContext):
     benchmark_enabled: bool = True
     # The trusted evaluations the candidate was measured by, stated at render time.
     cited_evidence: tuple[EvidenceRef, ...] = ()
+    strict_sequence: bool = False
+    base_revision: RevisionRef | None = None
 
 
 type PromptContext = Annotated[

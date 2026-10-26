@@ -37,13 +37,16 @@ class MultiConfig(Value):
     """The profile-guided preset's attribution command and plateau policy; None otherwise."""
     profiling: bool = False
     """Whether the run offers a profiler, so the routing and profiling turns can happen."""
+    strict_sequence: bool = False
+    """Finish one intervention per round, in order, or stop with an explicit failure."""
 
     @property
     def hypotheses(self) -> HypothesisConfig:
         """The hypothesis ledger's cadence and budget view of this configuration."""
         return HypothesisConfig(
             max_rounds=self.max_rounds,
-            judge_every=self.judge_every,
+            judge_every=1 if self.strict_sequence else self.judge_every,
             max_retries_per_round=self.max_retries_per_round,
-            max_continuation_rounds=self.max_continuation_rounds,
+            max_continuation_rounds=0 if self.strict_sequence else self.max_continuation_rounds,
+            strict_sequence=self.strict_sequence,
         )
