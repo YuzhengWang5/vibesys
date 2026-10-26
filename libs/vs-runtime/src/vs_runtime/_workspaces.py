@@ -73,7 +73,11 @@ class WorkspaceResource(Protocol):
     def has_revision(self, revision: str) -> bool: ...
 
     def matches_revision(
-        self, revision: str, *, exact_keeping: tuple[str, ...] | None = None
+        self,
+        revision: str,
+        *,
+        exact_keeping: tuple[str, ...] | None = None,
+        include_ignored: bool | None = None,
     ) -> bool: ...
 
     def unversioned_paths(self) -> tuple[str, ...]: ...
@@ -333,7 +337,11 @@ class RuntimeWorkspace:
         return await run_sync(self._owner.runner, self._resource.has_revision, revision)
 
     async def matches_revision(
-        self, revision: str, *, exact_keeping: tuple[str, ...] | None = None
+        self,
+        revision: str,
+        *,
+        exact_keeping: tuple[str, ...] | None = None,
+        include_ignored: bool | None = None,
     ) -> bool:
         self._ensure_open()
         async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-402310 [SLF001]; a workspace handle delegates synchronization to its owning collection.
@@ -342,6 +350,7 @@ class RuntimeWorkspace:
                 self._resource.matches_revision,
                 revision,
                 exact_keeping=exact_keeping,
+                include_ignored=include_ignored,
             )
 
     async def unversioned_paths(self) -> tuple[str, ...]:

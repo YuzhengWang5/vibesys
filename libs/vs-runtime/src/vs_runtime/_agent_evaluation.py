@@ -345,7 +345,7 @@ class SnapshotWorkspace(Protocol):
         """Commit the workspace's content and keep it reachable; the commit id."""
         ...
 
-    async def matches_revision(self, revision: str) -> bool:
+    async def matches_revision(self, revision: str, *, include_ignored: bool | None = None) -> bool:
         """Whether the workspace's content is exactly ``revision``."""
         ...
 
@@ -903,7 +903,7 @@ class AgentEvaluationBridge:
         """
         last = scoped.last_revision
         try:
-            if last is not None and await workspace.matches_revision(last):
+            if last is not None and await workspace.matches_revision(last, include_ignored=False):
                 return last
             revision = await workspace.snapshot_and_retain(
                 _SNAPSHOT_LABEL, retention_label=_SNAPSHOT_LABEL
