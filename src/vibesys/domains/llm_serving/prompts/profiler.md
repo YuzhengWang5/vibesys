@@ -28,10 +28,7 @@ exercise the reviewed production mechanism. It captures device kernels, not
 HTTP, admission, scheduling, queueing, or service batching; do not extrapolate
 without end-to-end evidence or recreate the production hot path just for it.
 
-Capture-tool argument contracts are engine-specific: see
-`serving-systems/references/tooling/profiling-serving-engines.md` and
-`serving-systems/references/engines/`. ROCm:
-`serving-systems/references/platforms/rocm/profiler.md`.
+Discover capture-tool argument contracts from the installed tool's help.
 
 {% if profile_execution == "remote" %}For remote profiling, discover the candidate's bounded controller/profile command
 from runtime/build configuration. Do not require a fixed Python module,
