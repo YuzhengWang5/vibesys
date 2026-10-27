@@ -30,10 +30,5 @@ server when valid.
 
 ## Use references as implementation support
 
-Read `serving-systems/SKILL.md`, then the one materialized
-`references/platforms/<backend>/floor.md`. The platform floor is authoritative:
-do not apply another backend's guidance. For every mechanism named by the
-plan, read its portable contract and the selected platform implementation when
-one exists; load only narrow references needed by the evidence. Search the
-reference tree before relying on priors. Name consulted references and their
-recommendations in the summary.
+Use the current task's model reference and declared API contract. Do not assume
+additional reference libraries are installed.

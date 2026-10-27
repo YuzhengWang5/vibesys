@@ -24,7 +24,6 @@ be necessary. Preserve decoded text and task-required accounting; never invent
 non-empty deltas or split characters to manufacture token records. Task
 evaluators decide whether counts come from token IDs, retokenized text, or records.
 
-The typed plan names the only endpoint surface in scope. Read the narrow
-serving-systems OpenAI API reference when exact request/response/SSE details are
-needed, and the FastAPI reference only if the selected architecture uses it.
+The typed plan names the only endpoint surface in scope. Use the task's API
+contract for request/response/SSE details.
 Do not add unrequested endpoints or preserve FastAPI as an unstated requirement.

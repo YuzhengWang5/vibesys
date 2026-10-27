@@ -310,8 +310,25 @@ def test_llm_serving_provides_evidence_led_orchestrator_method() -> None:
     assert "Evidence-led optimization method" in section
     assert "measured end-to-end evidence" in section
     assert "not technique popularity" in section
-    assert "performance-modeling.md" in section
+    assert "performance-modeling.md" not in section
     assert "current-architecture ceiling" in section
+
+
+@pytest.mark.parametrize("role", DOMAIN_ROLES)
+@pytest.mark.parametrize("interface", ["service", "inprocess"])
+@pytest.mark.parametrize("profile_execution", ["local", "remote"])
+def test_text_generation_roles_do_not_require_removed_skills(
+    role: DomainRole, interface: str, profile_execution: str
+) -> None:
+    section = render_domain_section(
+        resolve_domain(DomainName.LLM_SERVING),
+        role,
+        modality="text_generation",
+        interface=interface,
+        profile_execution=profile_execution,
+    )
+    assert "serving-systems" not in section
+    assert "references/platforms/" not in section
 
 
 def test_database_provides_in_place_orchestrator_method() -> None:
