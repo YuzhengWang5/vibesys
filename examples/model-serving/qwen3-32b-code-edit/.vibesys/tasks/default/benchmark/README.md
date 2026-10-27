@@ -17,7 +17,7 @@ Each request body:
 }
 ```
 
-`prediction.content` is OpenAI's [predicted-outputs](https://developers.openai.com/api/docs/guides/predicted-outputs) field. vLLM/SGLang ignore it today (the request still parses and runs as a normal completion); a server that consumes the field is the configuration this benchmark scores.
+`prediction.content` is the OpenAI predicted-outputs request field.
 
 ## What it captures (per sample)
 
@@ -29,11 +29,11 @@ For each successful response, in addition to the standard latency / TTFT / TPOT:
   - `longest_matched_run`
 - **Quality**: `ratio_to_gold`, `ratio_to_input`, `equals_input_verbatim`. The gate `ratio_to_gold > ratio_to_input` distinguishes a real fix from "echo the buggy input back."
 
-These fields are what an analytical predicted-outputs headroom estimate would consume — the bench just emits them, the math lives downstream.
+These fields describe the measured outputs.
 
 ## Token count canonicalisation
 
-`output_tokens` is computed by re-tokenising the concatenated server response — independent of how many tokens the server batches per SSE chunk. vLLM/SGLang flush all accepted spec tokens in one chunk, which would otherwise massively undercount tok/s. `num_chunks` is reported separately so you can also see effective spec accept length.
+`output_tokens` is computed by re-tokenising the concatenated server response, independently of SSE chunk boundaries. `num_chunks` is reported separately.
 
 ## Headline metric
 

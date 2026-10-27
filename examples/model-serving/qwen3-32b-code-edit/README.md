@@ -1,14 +1,14 @@
 # qwen3-32b-code-edit — predicted-outputs benchmark
 
-This input bundle measures **single-batch tok/s** of an OpenAI-style [predicted-outputs](https://developers.openai.com/api/docs/guides/predicted-outputs) server for `Qwen/Qwen3-32B` on the **code-debug** subset of [`m-a-p/CodeEditorBench`](https://huggingface.co/datasets/m-a-p/CodeEditorBench). The benchmark sends the buggy original code as `prediction.content` on every request; the server is expected to consume that prediction as the draft sequence for speculative decoding against the target.
+This input bundle measures **single-batch tok/s** of an OpenAI-style predicted-outputs server for `Qwen/Qwen3-32B` on the **code-debug** subset of [`m-a-p/CodeEditorBench`](https://huggingface.co/datasets/m-a-p/CodeEditorBench). Every request includes the buggy original code in `prediction.content`.
 
 **Single-batch only.** Concurrency 1. The metric the orchestrator tracks is `median_tok_per_sec` from `.vibesys/tasks/default/benchmark/benchmark.py`.
 
-## Why this dataset
+## Dataset
 
-CodeEditorBench's "code debug" rows hand the model an `incorrect_solutions` (the buggy code) and ask it to emit `solutions` (the same code with the bug fixed). On Python3 rows, **median character overlap between the two is 99.6%**, and 75% of matched runs are >16 chars long. That is exactly the regime predicted outputs is designed for: the model's output is dominated by long verbatim copies of a known prediction with a few small islands of new tokens.
+CodeEditorBench's "code debug" rows provide `incorrect_solutions` (the buggy code) and `solutions` (the corrected code).
 
-`benchmark/benchmark.py` records, per sample, the token-level alignment between the actual model output and the prediction (matched-run lengths, longest run, total matched/diverged tokens). Those numbers are what an analytical headroom calculation would feed on.
+`benchmark/benchmark.py` records per-sample timing, output quality and token-level alignment statistics.
 
 ## Layout
 
@@ -46,7 +46,7 @@ The benchmark drives an OpenAI-compatible `/v1/completions` endpoint. Every requ
 }
 ```
 
-The `prediction` field is the OpenAI predicted-outputs format. Servers that don't implement it (vLLM, SGLang today) just ignore it; a server that does implement it is the configuration this benchmark scores.
+The `prediction` field follows the OpenAI predicted-outputs request format. The server contract is defined in `OBJECTIVE.md`.
 
 ## How to run
 
