@@ -13,11 +13,11 @@ fields; do not add new reply-schema fields or change framework policy.
 For this task, the staged requirements below take precedence over serving-skills
 recommendations that CUDA Graphs or fused FlashInfer attention must be present
 in the first runnable version. Those two capabilities are deliberately deferred
-until stages S2 and S3. This is a temporary experimental exemption from those
+until stages S2 and S1 respectively. This is a temporary experimental exemption from those
 implementation recommendations, not from model correctness, evaluation,
 resource ownership, or service lifecycle requirements. Do not reject an S0/S1
-candidate just because it has no CUDA Graphs, or an S0/S1/S2 candidate just
-because it has no FlashInfer.
+candidate just because it has no CUDA Graphs, or an S0 candidate just because
+it has no FlashInfer. Prediction-driven verification is deferred until S3.
 
 ### Mandatory sequence
 
@@ -29,26 +29,32 @@ not a bundle of the three optimizations.
 | Stage | Single intervention | Required production path | Still forbidden |
 | --- | --- | --- | --- |
 | S0: runnable control | Establish the minimum correct, measurable AR service; no performance optimization yet | BF16 target-model greedy autoregression, eager PyTorch execution and PyTorch attention; concurrency 1 | Prediction-based multi-token verification, CUDA Graph capture/replay, FlashInfer, custom fused kernels, compiler/backend tuning, quantization, and unrelated performance changes |
-| S1: speculative decoding | Add prediction-driven fixed-K verification only | Eager target execution and the same attention backend as S0; K=16 speculative verification and its necessary KV rollback | CUDA Graphs, FlashInfer, auxiliary-kernel fusion, and any independent optimization |
-| S2: CUDA Graphs | Capture and replay the existing prefill/decode/verify computation only | Preserve the accepted S1 algorithm, K, attention backend, dtype, and arithmetic; capture its existing forward paths | FlashInfer, attention-provider replacement, new fusion kernels, lookup-policy changes, graph-width tuning sweeps, and any independent optimization |
-| S3: FlashInfer attention | Replace the current attention implementation with graph-enabled FlashInfer batched attention only | Preserve the accepted speculation policy, graph shapes, model equations, dtype and request behavior | Simultaneous KV-write fusion, norm/MLP fusion, GEMM-provider changes, new prefill widths, or any other independent optimization |
+| S1: FlashInfer attention | Replace the current attention implementation with eager FlashInfer batched attention only | Preserve S0 greedy autoregression, BF16 model equations and request behavior; use_cuda_graph=False, no capture/replay | Prediction-based multi-token verification, CUDA Graphs, simultaneous KV-write fusion, norm/MLP fusion, GEMM-provider changes, or any independent optimization |
+| S2: CUDA Graphs | Capture and replay the existing AR prefill/decode computation only | Preserve the accepted S1 attention backend, greedy AR algorithm, dtype and arithmetic; enable use_cuda_graph=True for retained FlashInfer attention | Prediction-based multi-token verification, attention-provider replacement, new fusion kernels, new prefill widths, graph-width tuning sweeps, and any independent optimization |
+| S3: speculative decoding | Add prediction-driven fixed-K verification only | Preserve the retained attention backend and graph execution mode; K=16 verification, necessary KV rollback and the fixed verifier graph required by that algorithm | Attention-provider replacement, auxiliary-kernel fusion, GEMM-provider changes, graph-width tuning sweeps, lookup-policy changes beyond the specified algorithm, or any independent optimization |
 | S4 and later | Choose one additional optimization mechanism per hypothesis and candidate | Start from a named trusted retained parent and keep all other mechanisms fixed | Bundles, parameter sweeps, speculative implementation of future ideas, or independent improvements hidden as prerequisites |
 
-S0 must accept the normal `prediction` request envelope, but it intentionally
-does not use its content for drafting: generate the answer with the real target
-model one token at a time. This is the only staged exception to the eventual
+S0-S2 must accept the normal `prediction` request envelope, but intentionally
+do not use its content for drafting: generate the answer with the real target
+model one token at a time. This is the staged exception to the eventual
 predicted-outputs algorithm. It is not permission to echo predictions, replay
 completed answers, alter prompts, or bypass the target. Keep this control
-implementation recoverable for the S1 comparison.
+implementation recoverable for the S1 attention comparison and retain the
+accepted S2 AR control for the S3 speculation comparison.
 
-For S1, replace only the generation mechanism described below. Do not implement
-S1/S2/S3 together under a title such as "bootstrap the complete fast engine".
+For S1, library-required layout and planning adaptations belong to the attention
+replacement; using FlashInfer to optimize unrelated KV writes or normalizations
+does not. Keep all execution eager, including FlashInfer planning and attention.
+Do not implement S1/S2/S3 together under a title such as "bootstrap the complete fast engine".
 For S2, fixed-address buffers and capture-safe orchestration strictly necessary
 for replay are part of that intervention, but replacing attention or fusing
 operators is not. If the existing computation cannot be captured correctly,
-record the blocker rather than importing S3 into S2. For S3, library-required
-layout and planning adaptations belong to the attention replacement; using
-FlashInfer to optimize unrelated KV writes or normalizations does not.
+record the blocker rather than replacing attention or importing S3 into S2.
+For S3, replace only the generation mechanism described below. If the incumbent
+uses graphs, adding the fixed width [seed] + K=16 verifier graph and its necessary
+buffers belongs to speculation; preserve existing AR graph shapes and attention,
+do not sweep widths or independently retune graph coverage. If an earlier stage
+was closed without adoption, retain and disclose that absence instead.
 
 Keep the target identity, BF16 weights/KV, request semantics, evaluator, workload,
 concurrency, and unrelated execution choices fixed throughout S0-S3. Do not
@@ -119,11 +125,11 @@ benchmark to make a stage pass.
 
 - Streaming `POST /v1/completions`. Bench sends `prompt_is_preformatted: True` — tokenize the prompt verbatim, no second chat template pass.
 - SSE text chunks need not correspond one-to-one to model tokens. Buffer partial UTF-8 characters or use empty fragment records without corrupting otherwise-valid Unicode or inventing text to make records non-empty. Speculatively accepted tokens may share a chunk. The unchanged benchmark re-tokenizes the concatenated response for `output_tokens`; SSE chunk count is reported separately, not used as the token count.
-- Accept the predicted-outputs envelope `{"prediction": {"type": "content", "content": "<text>"}}`. From S1 onward, tokenize `prediction.content` once at request-time; it is a draft hint, **not** part of the prompt. In S0, accept the envelope without using the hint.
+- Accept the predicted-outputs envelope `{"prediction": {"type": "content", "content": "<text>"}}`. From S3 onward, tokenize `prediction.content` once at request-time; it is a draft hint, **not** part of the prompt. In S0-S2, accept the envelope without using the hint.
 - Disable thinking mode (`enable_thinking=False`); Qwen3's `<think>...</think>` would blow past `max_tokens`.
-- Use eager execution in S0/S1. Introduce prefill/decode/verify-extend CUDA Graphs only in S2. Introduce FlashInfer batched attention with `use_cuda_graph=True` only in S3.
+- Use eager execution in S0/S1. Introduce FlashInfer batched attention with `use_cuda_graph=False` only in S1; introduce AR prefill/decode CUDA Graphs and `use_cuda_graph=True` only in S2. Introduce fixed-K speculative verification and its required verifier graph only in S3.
 
-## Speculation algorithm: introduce only in S1
+## Speculation algorithm: introduce only in S3
 
 Stateless n-gram lookup (prompt-lookup decoding). The drafter is the prediction
 itself: no drafter model and no cursor between cycles. Tokenize the prediction
@@ -134,9 +140,10 @@ matching prefix and emit prefix plus a bonus token, which seeds the next lookup.
 Use one verify forward per cycle, not an extra decode pass. On no match,
 including the first cycle, emit one AR token and retry. Keep K=16 fixed.
 
-S1 executes that forward eagerly with the S0 attention backend. S2 captures the
-same fixed-K verifier and the existing prefill/decode paths; it does not change
-the algorithm. S3 changes only attention to FlashInfer. Preserve correct
+S1 changes only attention to eager FlashInfer. S2 captures the accepted AR
+prefill/decode paths without introducing speculation. S3 introduces this fixed-K
+algorithm using the retained attention backend and execution mode, adding only
+the fixed verifier graph needed when graph execution was adopted. Preserve correct
 logit/draft alignment, accepted-prefix KV commitment, rejection rollback, EOS
 and generation-budget handling in every stage.
 
