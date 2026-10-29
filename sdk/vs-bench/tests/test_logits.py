@@ -52,3 +52,9 @@ def test_wrong_engine_results_cannot_hide_in_an_average(corruption: str) -> None
 def test_malformed_nonfinite_and_constant_responses_fail_closed(actual: np.ndarray) -> None:
     with pytest.raises(ValueError, match=r"shape|finite|constant"):
         compare_logits(np.array([[0, 1, 2, 3]]), actual)
+
+
+@pytest.mark.parametrize("reference", [np.zeros((0, 4)), np.ones((1, 1)), np.ones(4)])
+def test_invalid_reference_shapes_are_not_qualification_evidence(reference: np.ndarray) -> None:
+    with pytest.raises(ValueError, match="reference logits must have shape"):
+        compare_logits(reference, reference)

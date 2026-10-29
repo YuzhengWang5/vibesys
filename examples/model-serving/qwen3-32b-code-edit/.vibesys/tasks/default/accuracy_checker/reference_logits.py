@@ -37,11 +37,29 @@ def main() -> int:
     with torch.inference_mode():
         for case in cases:
             ids = torch.tensor([case["input_ids"]], device="cuda")
-            output = model(ids, use_cache=False).logits[0, case["positions"]].float().cpu().numpy()
             if "file" in case:
+                # Match GEMM shapes: BF16 cached vs monolithic forwards can
+                # differ materially even in an unmodified HF implementation.
+                length = case["prefill_length"]
+                result = model(ids[:, :length], use_cache=True)
+                cache = result.past_key_values
+                rows = [result.logits[0, -1:].float().cpu()]
+                for size in case["decode_chunk_sizes"]:
+                    result = model(
+                        ids[:, length : length + size],
+                        past_key_values=cache,
+                        use_cache=True,
+                    )
+                    cache = result.past_key_values
+                    rows.append(result.logits[0].float().cpu())
+                    length += size
+                output = torch.cat(rows).numpy()
                 candidate = np.load(args.artifacts / case["file"], allow_pickle=False)
                 report = compare_logits(output, candidate).model_dump()
             else:
+                output = (
+                    model(ids, use_cache=False).logits[0, case["positions"]].float().cpu().numpy()
+                )
                 chosen = np.asarray(case["generated"])
                 regret = output.max(axis=1) - output[np.arange(len(chosen)), chosen]
                 report = {

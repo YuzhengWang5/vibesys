@@ -75,7 +75,15 @@ def collect(args: argparse.Namespace) -> None:
                     raise ValueError(f"case {index}: nonfinite logits")
                 filename = f"candidate-{index}-{schedule_index}.npy"
                 np.save(args.artifacts / filename, array, allow_pickle=False)
-                cases.append({"input_ids": ids, "positions": positions, "file": filename})
+                cases.append(
+                    {
+                        "input_ids": ids,
+                        "positions": positions,
+                        "file": filename,
+                        "prefill_length": length,
+                        "decode_chunk_sizes": chunks,
+                    }
+                )
             if index < 3:
                 prompt = tokenizer.apply_chat_template(
                     [{"role": "user", "content": source}],
