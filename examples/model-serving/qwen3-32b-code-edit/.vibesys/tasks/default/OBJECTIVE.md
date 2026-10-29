@@ -1,39 +1,32 @@
-Maximize **single-batch end-to-end completion throughput** (median completion tokens per second) for **code-debug** edits driven by `.vibesys/tasks/default/benchmark/benchmark.py`. The target model is `Qwen/Qwen3-32B`. Implement an OpenAI-style **predicted-outputs** server: each request body carries a `prediction.content` field (the buggy original code), and the server consumes that prediction as the draft sequence in a speculative-decoding loop against the target.
+# 单一优化：CUDA Graph
 
-**Headline metric**: `median_tok_per_sec` from `.vibesys/tasks/default/benchmark/benchmark.py`'s JSON output ("Primary metric: median_tok_per_sec = ..."). Single-batch (concurrency 1), tokens counted by re-tokenizing the concatenated server response. This is the only number `perf_metric` should record.
+在 Qwen/Qwen3-32B 的 code-debug 工作负载上提高单请求、concurrency=1 的
+端到端 completion throughput。唯一性能指标为原始 benchmark JSON 的
+`median_tok_per_sec`，按拼接输出重新 tokenize 计数。
 
-## Server contract
+本次唯一允许的宏观性能优化是 **CUDA Graph**。整个 agent outerloop
+预算为 5 轮，只围绕这一项实现、排障和验证，直到跑通并观察到可归因的
+优化效果；不得转向或叠加任何其他性能机制。必要的服务、依赖和正确性修复
+可以进行，但不得伪装成初始化而引入额外优化。
 
-- Streaming `POST /v1/completions`. Bench sends `prompt_is_preformatted: True` — tokenize the prompt verbatim, no second chat template pass.
-- SSE text chunks need not correspond one-to-one to model tokens. Buffer partial UTF-8 characters or use empty fragment records without corrupting otherwise-valid Unicode or inventing text to make records non-empty. Speculatively accepted tokens may share a chunk. The unchanged benchmark re-tokenizes the concatenated response for `output_tokens`; SSE chunk count is reported separately, not used as the token count.
-- Accept the predicted-outputs envelope `{"prediction": {"type": "content", "content": "<text>"}}`. Tokenize `prediction.content` once at request-time; it is a draft hint, **not** part of the prompt.
-- Disable thinking mode (`enable_thinking=False`); Qwen3's `<think>...</think>` would blow past `max_tokens`.
-- Capture prefill/decode/verify-extend in CUDA graphs. Default attention: FlashInfer batched wrappers with `use_cuda_graph=True`.
+先建立并测量未优化的 BF16 eager 自回归服务基线，保持原始权重和计算精度。
+随后仅实施上述唯一优化，用同一 workload、设备、精度和评测命令进行
+未优化/优化生产路径 A/B。记录真实激活证据和吞吐差异；无提升或未通过
+正确性时如实报告，不把不同配置、额外机制或噪声归因为本次优化。
 
-## Speculation algorithm
+## 生产服务与精度
 
-Stateless n-gram lookup (prompt-lookup decoding). The drafter is the prediction itself — no drafter model, no cursor between cycles. Each cycle: tokenize `prediction.content` once; take the last 2-8 emitted tokens as a needle and find the rightmost occurrence in the prediction; propose the next K tokens after the match as the draft; verify in one forward over `[seed] + draft` through the captured graph; accept the longest matching prefix and emit prefix + bonus token, which seeds the next lookup. One verify forward per cycle — no separate decode pass. On no match (including the very first cycle), emit one AR token and retry. Use a single K=16 verify graph throughout.
-
-## Expected throughput
-
-K=16 + speculation on this workload (90–95 % per-token match) should land in **~200–400 median tok/s** on H100 bf16 vs ~30 tok/s vanilla AR. 
-
-## Official evaluation service lifecycle
-
-Implement a candidate-owned `run_server.sh` at the project root. It must accept
-`--model-dir /model --port PORT`, prepare its dependencies from the committed
-project, and run the candidate service in the foreground until stopped.
-`GET /health` must return HTTP 200 only after the real model is ready to serve.
-Do not daemonize the launcher or depend on a server left by an earlier command.
-
-The framework runs accuracy and benchmark in separate fresh containers at the
-submitted candidate revision. Each configured command invokes the read-only
-`managed_evaluation.py` that starts `run_server.sh`, waits up to 900 seconds for
-readiness, executes the original evaluator, and stops the service and its
-descendants. The checker and benchmark correctness rules are unchanged.
-
-Stop any GPU self-test service before submitting a framework evaluation, so the
-single allocated GPU does not hold two copies of Qwen3-32B. For local use, call
-the configured managed commands too; do not start a second service alongside
-them. A missing launcher, startup failure, or service exit is an evaluation
-failure with the service log retained, not a valid performance measurement.
+- 项目根提供前台 `run_server.sh --model-dir /model --port PORT`；
+  `/health` 在真实模型就绪后才返回 200。正式评测每次使用新环境，
+  不依赖遗留服务。提交评测前停止自测服务，避免同卡双份模型。
+- 提供 streaming `POST /v1/completions`；`prompt_is_preformatted=true`
+  时原样 tokenize，不再套 chat template。关闭 thinking。
+- 接受 `prediction.content`，它只是请求中的候选文本提示，不属于 prompt；
+  是否使用该提示必须遵守本次唯一优化边界。
+- SSE 文本必须正确重建输出，不得截断合法 Unicode、虚构字符或重放缓存答案。
+  chunk 数不是 token 数。
+- 完整实现只读 `accuracy_checker/README.md` 规定的生产 logits 观测接口
+  及 SSE token ID 观测。观测必须经过同一生产 forward、权重、attention、
+  KV 管理和实际启用的优化，禁止另起参考模型旁路。
+- 使用 manifest 的标准 accuracy 工具核验原生 Hugging Face BF16 logits
+  和实际生成决策。不得修改、替换、弱化 checker、参考模型、阈值或 benchmark。

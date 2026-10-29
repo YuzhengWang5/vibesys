@@ -1,6 +1,6 @@
 # qwen3-32b-code-edit — predicted-outputs benchmark
 
-This input bundle measures **single-batch tok/s** of an OpenAI-style [predicted-outputs](https://developers.openai.com/api/docs/guides/predicted-outputs) server for `Qwen/Qwen3-32B` on the **code-debug** subset of [`m-a-p/CodeEditorBench`](https://huggingface.co/datasets/m-a-p/CodeEditorBench). The benchmark sends the buggy original code as `prediction.content` on every request; the server is expected to consume that prediction as the draft sequence for speculative decoding against the target.
+This input bundle measures **single-batch tok/s** of an OpenAI-style [predicted-outputs](https://developers.openai.com/api/docs/guides/predicted-outputs) server for `Qwen/Qwen3-32B` on the **code-debug** subset of [`m-a-p/CodeEditorBench`](https://huggingface.co/datasets/m-a-p/CodeEditorBench). The benchmark sends the buggy original code as `prediction.content` on every request. The pinned objective determines which single optimization the candidate may implement.
 
 **Single-batch only.** Concurrency 1. The metric the orchestrator tracks is `median_tok_per_sec` from `.vibesys/tasks/default/benchmark/benchmark.py`.
 
@@ -24,7 +24,8 @@ qwen3-32b-code-edit/
     │   ├── benchmark.py               # /v1/completions driver, single-batch
     │   └── README.md
     ├── accuracy_checker/
-    │   ├── checker.py                 # quality gate: prevents echo-input bypass
+    │   ├── checker.py                 # native HF logits and production token gate
+    │   ├── reference_logits.py        # independent native HF numerical reference
     │   └── README.md
     └── reference/
         ├── README.md                  # how to mount the target model
