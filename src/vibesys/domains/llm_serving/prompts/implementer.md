@@ -31,8 +31,10 @@ server when valid.
 ## Use references as implementation support
 
 Read `serving-systems/SKILL.md`, then the one materialized
-`references/platforms/<backend>/floor.md`. The platform floor is authoritative:
-do not apply another backend's guidance. For every mechanism named by the
+`references/platforms/<backend>/floor.md`. The pinned objective's mechanism
+restrictions override reference recommendations, including during initial
+setup. Do not apply another backend's guidance or introduce an additional
+optimization outside the objective. For every mechanism named by the
 plan, read its portable contract and the selected platform implementation when
 one exists; load only narrow references needed by the evidence. Search the
 reference tree before relying on priors. Name consulted references and their

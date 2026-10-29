@@ -56,9 +56,10 @@ Implement a foreground `run_server.sh --model-dir /model --port PORT` in the
 candidate project. Mount the target weights read-only at `/model`. The service
 must return HTTP 200 from `/health` only after the real model is ready.
 
-Both manifest commands run `managed_evaluation.py`: it launches the submitted
-candidate, waits up to 900 seconds for readiness, runs the original client,
-then stops the service and its descendants. Accuracy and benchmark each use a
+Both manifest commands use `managed_evaluation.py`: it launches the submitted
+candidate, waits up to 900 seconds for readiness, runs the client,
+then stops the service and its descendants. Accuracy subsequently loads the
+native HF reference after candidate cleanup. Accuracy and benchmark each use a
 fresh container; a service started in an agent's container is not available
 in a formal evaluation container. Stop self-test services before submitting
 formal evaluation to avoid loading two models onto the allocated GPU.
@@ -70,8 +71,7 @@ preserved. Startup time is outside the request throughput measurement.
 For example, in the prepared candidate environment:
 
 ```bash
-python .vibesys/tasks/default/managed_evaluation.py -- \
-    uv run python .vibesys/tasks/default/accuracy_checker/checker.py \
+uv run python .vibesys/tasks/default/accuracy_checker/checker.py --managed \
     --tokenizer-path /model --seed 42
 ```
 
@@ -92,8 +92,10 @@ The bench prints the headline `Primary metric: median_tok_per_sec = ...` line an
 
 ## Accuracy gate
 
-The unchanged checker requires no request errors and at least 50% of steady
-outputs to reach gold-solution similarity 0.50. This is a loose similarity
-gate, not full semantic correctness or a complete anti-echo check.
+The checker compares full-vocabulary production logits and streamed token
+decisions with native Hugging Face BF16 inference. Its numerical tolerances,
+KV-cache coverage and required observation interface are specified in
+`accuracy_checker/README.md`. The accuracy manifest owns service startup,
+cleanup and sequential reference-model loading.
 The benchmark separately records verbatim echo and improvement-over-input
 statistics; retain those statistics alongside throughput.

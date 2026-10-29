@@ -3029,6 +3029,8 @@ version = "0.1.0"
 source = { editable = "sdk/vs-bench" }
 dependencies = [
     { name = "httpx" },
+    { name = "numpy" },
+    { name = "pydantic" },
 ]
 
 [package.optional-dependencies]
@@ -3041,6 +3043,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "pydantic", specifier = ">=2" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest-asyncio", marker = "extra == 'dev'" },
     { name = "respx", marker = "extra == 'dev'" },

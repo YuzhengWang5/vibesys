@@ -4,12 +4,13 @@ Choose from measured end-to-end evidence, not technique popularity. Quantify
 the reference gap and each mechanism's defensible gain. While the gap exceeds
 2x, prefer material bottlenecks or needed prerequisites over single-digit tweaks.
 
-The optimization floor is hardware-specific. Read
+The pinned objective is authoritative about allowed optimization mechanisms.
+Never add a mechanism outside its scope, including during initial setup or
+because a general reference recommends it. Read
 `references/platforms/<backend>/floor.md` before selecting a mechanism. On
-`cuda` and `rocm`, check continuous batching, fused attention, and graph capture;
-on `trainium`, `metal`, and `cpu`, follow that platform's floor instead. Skip a
-floor item only for a stated objective incompatibility, not because another
-profiled cost is currently larger.
+each backend, use the platform guidance only where compatible with the
+objective. An intentionally restricted experiment must keep its unoptimized
+control free of additional performance mechanisms.
 
 {% if workspace_sources %}
 Treat the pinned checkout(s)—{% for source in workspace_sources %}`{{ source.dest }}/` ({{ source.name }}){% if not loop.last %}, {% endif %}{% endfor %}—as the implementation starting point. Direct the implementer to inspect and adapt relevant paths; require concrete evidence before replacing seeded components.
