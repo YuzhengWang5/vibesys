@@ -1,0 +1,37 @@
+{% if document == "direction" %}
+# Qwen3 单因素实验
+
+源码工作树：`{{ source }}`。计划：1 次 pilot（cuda-graph）；
+pilot 经可信精度、benchmark、单因素正收益与框架终态审查通过后，
+开放四种宏观方向各五次独立重复。串行队列，每 run 全程租一张卡。
+每次执行真实 tested_commit 见 CODE_PIN.md；状态见各 run/logs/status.json。
+所有运行使用 outer-loop=agent、Copilot CLI gpt-6.1-sol、max-rounds=5、
+max-in-flight=1。不自动降精度、不改可信评测、不复用失败 attempt。
+{% elif document == "run" %}
+# {{ spec.slot.phase }} / {{ spec.slot.optimization }} / repeat {{ spec.slot.repeat }}
+
+目的：先未经优化 eager BF16 AR 基线，再唯一因素 A/B；未经验证不宣称收益。
+
+- source: `{{ spec.source }}`；branch: `{{ spec.branch }}`
+- tested_commit: `{{ spec.tested_commit }}`
+- candidate 初始 commit: `{{ spec.candidate_commit }}`
+- candidate: `{{ spec.run }}/project`（独立导出、无旧实验历史）
+- attempt: {{ spec.attempt }}；retry_of: {{ spec.retry_of }}
+- framework run_id: `{{ spec.run_id }}`
+- 模型：`{{ spec.model }}`，BF16；evaluator 挂载 `/model`
+- setup: outer-loop=agent；Copilot CLI gpt-6.1-sol；max-rounds=5；max-in-flight=1
+- 设备 CUDA_VISIBLE_DEVICES：`{{ state.cuda_visible_devices }}`
+- 状态：{{ state.status }}；更新时间：{{ state.updated_at }}
+- OBJECTIVE SHA256：`{{ spec.objective_sha256 }}`（快照与脚本 hashes 在 scripts/）
+
+gpuctl 为每个 run 全程持有一张卡；启动前 nvidia-smi 存 logs/，
+显式 export CUDA_VISIBLE_DEVICES 后再启动框架。trusted checker 与性能实现均未修改。
+{% elif document == "summary" %}
+# 实验结果
+
+- tested_commit: `{{ spec.tested_commit }}`
+- 状态：{{ state.status }}；returncode：{{ state.returncode }}
+- 说明：{{ state.detail }}
+- 结果依据：logs/inspection.json 与可信 core/receipt ledger；退出 0 不等于实验通过。
+- 保留建议：保留原始证据供操作者审查；未验证不进入成功结论。
+{% endif %}

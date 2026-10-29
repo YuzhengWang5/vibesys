@@ -1,0 +1,32 @@
+{% if document == "root" %}
+# Qwen3-32B 单因素实验输入
+
+唯一优化目标见 `.vibesys/tasks/default/OBJECTIVE.md`。本目录从当前干净源码
+checkpoint 独立导出，不含旧实验实现或 Git 历史。
+
+服务契约：前台 `run_server.sh --model-dir /model --port PORT`；
+`/health` 在真实模型就绪后返回 200；实现 OpenAI 风格流式 `/v1/completions`。
+工作负载固定为 CodeEditorBench code-debug、单请求、concurrency=1；
+保持 BF16、greedy、禁用 thinking 和模型 token 计数。请求里的 prediction 字段
+不强制实现任何机制；允许范围完全由本次 OBJECTIVE 决定。
+
+可信 accuracy/benchmark 通过任务 manifest 调用，不得修改。
+详见 accuracy_checker/README.md 的 logits 和 SSE token_ids 协议。
+{% elif document == "benchmark" %}
+# 固定吞吐评测
+
+`benchmark.py` 是不变的可信评测，主指标为 `median_tok_per_sec`。
+保持既有 CodeEditorBench code-debug、concurrency=1、seed=42、
+50 samples、warmup=3、max_tokens=512 与流式模型 token 统计。
+prediction 是工作负载输入，不规定算法或授权额外优化。
+只执行 OBJECTIVE 指定的唯一优化；先可信测量 eager BF16 AR 基线，再单因素 A/B。
+保留原始输出、逐样本统计与可信 evidence；不得修改客户端实现或测量口径。
+{% elif document == "reference" %}
+# Qwen3-32B 固定参考
+
+模型权重只读挂载 `/model`，使用 Qwen/Qwen3-32B BF16，禁用 thinking。
+本目录的 config、reference.py、meta.json 是模型说明，不是优化实现路线。
+可信精度参考由 checker 在候选服务完全停止后独立加载 HF 模型计算。
+具体协议和阈值以相邻 accuracy_checker/README.md 为准，不得改变可信评测。
+候选 `/v1/logits` 必须调用自己的真实生产 forward，不能调用另一个 HF 参考旁路。
+{% endif %}

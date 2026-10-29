@@ -1,0 +1,31 @@
+# Qwen3-32B：{{ optimization }} 单因素实验
+
+本次唯一允许的宏观优化是 **{{ optimization }}**。五次重复均保持这一宏观目标，
+实现方案由实验自然产生，不预设具体算法、参数或实现路线。先修正确性与工程问题，
+再只围绕该优化持续迭代，直至观察到相对于基线的可信对比收益或预算耗尽。
+不得加入第二种优化，不得以“生产 floor”、参考资料建议或框架默认习惯扩大范围。
+
+先构建未经优化的 eager BF16 自回归（AR）生产服务基线，完成可信 accuracy 和
+benchmark 并保留其不可变 revision、日志与测量证据；然后仅改变本次唯一因素，
+在同一模型、权重、精度、设备、工作负载、参数与测量口径下做 A/B。
+不要把已有优化引擎、其他实验代码或历史当成起点。不得降精度、量化、改变题目、
+缩减评测、复用历史答案或绕过门禁。预算内先提交基线正式评测，再提交优化候选正式评测；
+agent 自测结果不能代替框架可信测量。最终记录 A/B 两个 revision 与可信 evidence 标识。
+
+目标模型为 Qwen/Qwen3-32B，权重挂载于 `/model`。保持单请求、concurrency=1，
+优化 `.vibesys/tasks/default/benchmark/benchmark.py` 的 `median_tok_per_sec`。
+benchmark 请求可含 `prediction.content`；它是输入数据，而不是额外优化的授权。
+服务实现 `run_server.sh --model-dir /model --port PORT`，保持前台运行，
+真实模型就绪后 `/health` 才返回 200。禁用 thinking，保持原始 SSE 与 model-token 计数。
+每个模型输出 token 必须具有生产模型计算依据，不得回放已完成请求的输出。
+
+精度以 `.vibesys/tasks/default/accuracy_checker/README.md` 的新可信门禁为准。
+实现其 `/v1/logits` 全词表原始 logits 协议和 `return_token_ids:true` 的 SSE token_ids。
+`/v1/logits` 必须复用 `/v1/completions` 同一真实生产 forward、权重、attention、
+精度与 KV 管理；优化启用后该观测接口也经过该生产路径，不得另建 HF 旁路。
+候选采集结束并完全清理后，可信 checker 独立加载 HF BF16 eager 参考进行比对。
+不得修改 checker、reference、manifest、benchmark、SDK 或任何可信评测内容，
+不得调整阈值。数值通过不代替代码路径审查；最终明确给出路径共享及唯一因素审计证据。
+
+完成后保留未经优化基线和优化候选的源码、准确性与吞吐证据、激活证据及局限。
+若没有可信正收益，应如实报告失败，不得宣称成功。

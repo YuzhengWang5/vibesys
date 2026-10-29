@@ -1,0 +1,14 @@
+{
+  "baseline_revision": "从 inspect 的可信测量填写 eager BF16 AR commit",
+  "candidate_revision": "从 inspect 填写最终验证采纳的唯一因素优化 commit",
+  "baseline_request_id": "从 inspect 填写",
+  "candidate_request_id": "从 inspect 填写",
+  "baseline_evidence_id": "从 inspect 填写",
+  "candidate_evidence_id": "从 inspect 填写",
+  "reviewer": "填写实际操作者",
+  "audit": "填写源码 diff、生产 forward 共享、基线未优化和唯一因素审计的具体证据，不接受仅复述 agent 结论。",
+  "eager_bf16_ar_baseline": false,
+  "only_assigned_optimization": false,
+  "production_logits_shared_forward": false,
+  "trusted_evaluation_unchanged": false
+}
