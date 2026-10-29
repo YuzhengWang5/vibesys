@@ -4,7 +4,7 @@
 标准 accuracy 工具及正式评测均调用同一 manifest 命令：
 
 ```bash
-uv run python .vibesys/tasks/default/accuracy_checker/checker.py --managed --tokenizer-path /model --seed 42
+python .vibesys/tasks/default/accuracy_checker/launch.py --tokenizer-path /model --seed 42
 ```
 
 候选服务先启动、收集结果、完全停止，再加载未经修改的 Hugging Face
@@ -15,6 +15,8 @@ uv run python .vibesys/tasks/default/accuracy_checker/checker.py --managed --tok
 增量计划必须匹配：原生 HF BF16 的不同 GEMM shape 本身就可能产生
 明显的全词表尾部差异，不能把 monolithic forward 当作任意分块的逐值 oracle。
 任何请求、协议、非有限值、形状或数值错误均失败，不回退到文本相似度。
+`launch.py` 在首次空候选缺少 `run_server.sh` 时先给出明确失败，
+不先为一个尚未实现的服务下载 GPU 依赖；有 launcher 时执行相同 uv managed gate。
 输出逐 case JSON 和最终 `passed`、依赖版本、固定阈值及全部诊断；
 参考与候选数组属于本次 evaluator 临时目录，退出后清理。
 

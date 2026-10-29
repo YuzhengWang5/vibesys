@@ -15,6 +15,7 @@ from qwen3_single_optimization.core import (
     RunSpec,
     RunState,
     Status,
+    acknowledged_failures,
     can_launch,
     slots,
     verify_ab,
@@ -83,6 +84,8 @@ def test_objective_names_only_the_assigned_treatment(optimization: Optimization)
     assert optimization.value in rendered
     assert all(item.value not in rendered for item in Optimization if item != optimization)
     assert "K=16" not in rendered
+    assert "五次重复" not in rendered
+    assert "自然产生" not in rendered
     assert "生产 forward" in rendered
     assert "eager BF16" in rendered
     assert "HF 旁路" in rendered
@@ -197,3 +200,14 @@ def test_fixed_five_round_public_launch_contract() -> None:
     assert "--no-skills" not in args
     with pytest.raises(ValidationError):
         RunSpec.model_validate({**spec.model_dump(), "max_rounds": 24})
+
+
+def test_acknowledgement_never_skips_pilot_or_unfinished_trials() -> None:
+    failed = Path("/failed")
+    unfinished = Path("/unknown")
+    assert acknowledged_failures("batch", {failed}, {failed}) == {failed}
+    assert acknowledged_failures("batch", set(), {failed}) == set()
+    with pytest.raises(ValueError, match="pilot"):
+        acknowledged_failures("pilot", {failed}, {failed})
+    with pytest.raises(ValueError, match="最新 attempt"):
+        acknowledged_failures("batch", {unfinished}, {failed})

@@ -158,6 +158,19 @@ def can_launch(state: RunState) -> None:
         fail(f"{state.status}: 不可重跑原 attempt; 查询证据后使用 retry 新建 run。")
 
 
+def acknowledged_failures(
+    phase: Literal["pilot", "batch"],
+    requested: set[Path],
+    failed: set[Path],
+) -> set[Path]:
+    """Only explicit existing batch failures may be skipped, never an unknown launch."""
+    if requested and phase != "batch":
+        fail("pilot 失败不能跳过。")
+    if not requested <= failed:
+        fail("--acknowledged-failure 必须指向本队列已失败的最新 attempt。")
+    return requested
+
+
 def verify_ab(inspection: Inspection, review: PilotReview) -> tuple[Measurement, Measurement]:
     """Require normal final adoption and genuinely comparable trusted A/B gain."""
     if not inspection.terminal_success:
@@ -197,6 +210,7 @@ __all__ = [
     "RunState",
     "Slot",
     "Status",
+    "acknowledged_failures",
     "can_launch",
     "fail",
     "slots",

@@ -5,7 +5,7 @@ backends = ["cuda"]
 domain = "llm-serving"
 
 [accuracy]
-command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/checker.py", "--managed", "--tokenizer-path", "/model", "--seed", "42"]
+command = ["python", "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/launch.py", "--tokenizer-path", "/model", "--seed", "42"]
 timeout_seconds = 1800
 
 [benchmark]

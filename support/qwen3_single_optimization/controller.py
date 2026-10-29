@@ -32,6 +32,7 @@ from qwen3_single_optimization.core import (
     RunState,
     Slot,
     Status,
+    acknowledged_failures,
     can_launch,
     fail,
     slots,
@@ -579,9 +580,17 @@ def queue(args: argparse.Namespace) -> None:
             fail("准备的 slot 不完整; 不启动部分 batch。")
         if args.phase == "batch":
             load_approval(experiment, planned[0].source)
+        acknowledged = acknowledged_failures(
+            args.phase,
+            {path.resolve() for path in args.acknowledged_failure},
+            {spec.run for spec in planned if read_state(spec.run).status is Status.FAILED},
+        )
         for spec in planned:
             state = read_state(spec.run)
             if state.status is Status.FINISHED:
+                continue
+            if spec.run in acknowledged:
+                LOGGER.error("保留已审查的失败实验, 不重跑、不计作成功: %s", spec.run)
                 continue
             can_launch(state)
             validate_inputs(spec)
@@ -726,6 +735,7 @@ def parser() -> argparse.ArgumentParser:
         sub.add_argument("--experiment", type=Path, required=True)
         if name == "queue":
             sub.add_argument("--phase", choices=("pilot", "batch"), required=True)
+            sub.add_argument("--acknowledged-failure", type=Path, action="append", default=[])
         sub.set_defaults(function=function)
     for name, function in (
         ("worker", worker),

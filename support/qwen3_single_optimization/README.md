@@ -83,6 +83,10 @@ bash "$control" queue --experiment /absolute/exps/direction --phase batch
 
 retry 新建 run 并链接 retry_of，不覆盖旧记录。运行中或启动状态不明时拒绝
 retry；应先核实原 gpuctl 进程及本 run 资源已停止，不能用修改状态文件跳过审查。
+若某正式实验确实耗尽五轮算法预算，操作者审查并记录失败后，可在 batch queue
+显式传 `--acknowledged-failure /absolute/failed-run` 继续其余 slot；可重复指定。
+原实验仍保留 failed，不算成功，也不额外授予优化轮次。新发生的失败仍停止队列。
+基础设施故障不可据此伪装成算法失败，必须先修复并按 checkpoint/pilot 规则恢复。
 意外 SIGKILL 留下的不明 intent 故意不自动 replay；保留证据后重新准备独立 pilot。
 所有命令应由同一操作者执行；此工具不是抵御恶意宿主操作者的安全边界。
 
