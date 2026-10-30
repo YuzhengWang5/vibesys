@@ -31,6 +31,7 @@ from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_e
 from vs_agent.api import AgentSessionKey, AgentSessionState, DurableSessionStore, InvocationOutcome
 from vs_agent.api.testing import FakeAgentSessions
 from vs_core.api import Access, ObservationStatus
+from vs_project.api import NestedRepositoryError
 from vs_runtime.api import RuntimeContractError, WorkspaceAccess
 from vs_runtime.api.core import (
     AccessGrant,
@@ -344,6 +345,36 @@ def world(tmp_path: Path) -> Iterator[AccessWorld]:
 
 def status(result: ExecutionResult) -> ObservationStatus:
     return result.observation.observation.status
+
+
+@pytest.mark.parametrize("kind", ["directory", "file"])
+@pytest.mark.parametrize("ignored", [False, True])
+@pytest.mark.asyncio
+async def test_candidate_writer_settles_before_nested_repository_snapshot_refusal(
+    world: AccessWorld, kind: str, *, ignored: bool
+) -> None:
+    """Authorized writes settle without host Git inspecting agent-owned repositories."""
+    world.access = Access.WRITE_CANDIDATE
+    world.host = world.open()
+    nested = "evidence/source-checkpoint/.git"
+    world.writes = {f"{nested}/config" if kind == "directory" else nested: "agent-owned metadata\n"}
+    if ignored:
+        world.writes[".gitignore"] = "evidence/\n"
+    await world.route(ensure_request())
+
+    completed = await world.route(dispatch_request())
+
+    assert status(completed) is ObservationStatus.SUCCEEDED
+    proof = ReleasedRunInvocations(
+        JournalRunInvocations(world.host.sessions(), world.store()),
+        world.host.sessions(),
+        world.store(),
+    )
+    assert proof.unproven(run_snapshot("inv-1")) is None
+    with pytest.raises(NestedRepositoryError) as refused:
+        await world.root.snapshot("candidate-must-still-be-refused")
+    assert nested in refused.value.paths
+    assert (world.root.path / nested).exists()
 
 
 @pytest.mark.asyncio
@@ -687,8 +718,18 @@ async def play(world: AccessWorld, outcome: Outcome, restart: Restart) -> None:
         if restart is Restart.SNAPSHOT_FIRST:
             lifecycle_executor(world.host, world.store())  # the restarted host is up, idle
             frozen = tree(world.root.path)
-            with pytest.raises(RuntimeContractError):
+            proof = ReleasedRunInvocations(
+                JournalRunInvocations(world.host.sessions(), world.store()),
+                world.host.sessions(),
+                world.store(),
+            )
+            proven = proof.unproven(run_snapshot("inv-1")) is None
+            try:
                 await world.root.snapshot("before-any-executor")
+            except RuntimeContractError:
+                assert not proven
+            else:
+                assert proven
             assert tree(world.root.path) == frozen
         await world.route(ends_here)
         await world.route(inspect_request("req-i2", "inv-1"))

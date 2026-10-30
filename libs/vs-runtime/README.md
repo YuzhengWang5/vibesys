@@ -25,6 +25,12 @@ write grants, owns reverse-order cleanup, and delegates provider continuity to
 `vs_agent`. Product composition temporarily supplies the concrete agent opener
 until sandbox and client construction move into this library as well.
 
+Settling a candidate writer proves its write grant, not that its tree can be
+snapshotted. A read-write grant does not require a host Git inventory of those
+authorized writes. Nested repositories still fail the subsequent snapshot with
+an explicit diagnostic; access settlement must not turn that refusal into an
+uncaught session error.
+
 `SlotMeter(path, clock=..., threads=...)` records generic occupancy leases with `open`,
 `heartbeat`, and `close`. The clock supplies monotonic elapsed seconds in the
 same epoch across reloads. Its append-only JSONL ledger is fsynced before each

@@ -193,13 +193,14 @@ async def enforce_workspace_access(
     baseline: str,
     *,
     observer: Callable[[list[str]], None] | None = None,
-) -> WorkspaceAccessResult:
+) -> None:
     """Revert what *grant*'s role wrote outside its access since *baseline* was snapshotted.
 
     The single place that applies the access policy after a turn, shared by the
     legacy session and the session executors. A role with write access is only
-    reconciled against records other sessions left pending. Calling it again after a
-    crash or a failed revert resumes the same restoration.
+    reconciled against records other sessions left pending, not inventoried by host
+    Git: all its writes are authorized, even when a later snapshot must refuse them.
+    Calling it again after a crash or a failed revert resumes the same restoration.
     """
     if grant.access is not WorkspaceAccess.READ_WRITE:
         limited = grant.access is WorkspaceAccess.LIMITED
@@ -209,7 +210,4 @@ async def enforce_workspace_access(
             grant.paths if limited else (),
             grant.directories if limited else (),
         )
-    result = await workspace.access_recovery.settle(workspace, observer=observer)
-    if grant.access is WorkspaceAccess.READ_WRITE:
-        return WorkspaceAccessResult(result.restored_paths, await workspace.pending_changes())
-    return result
+    await workspace.access_recovery.settle(workspace, observer=observer)
