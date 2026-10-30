@@ -158,6 +158,29 @@ def can_launch(state: RunState) -> None:
         fail(f"{state.status}: 不可重跑原 attempt; 查询证据后使用 retry 新建 run。")
 
 
+def can_retry(state: RunState, previous_commit: str, current_commit: str) -> None:
+    """Supersede terminal attempts, or unstarted inputs pinned to an obsolete checkpoint."""
+    if state.status in {Status.FINISHED, Status.FAILED}:
+        return
+    if state.status is Status.PREPARED and previous_commit != current_commit:
+        return
+    fail("运行中/启动不明或同 checkpoint 未启动的 attempt 不可 retry; 先核对状态和资源。")
+
+
+def can_replace_approval(
+    previous_commit: str | None, current_commit: str, supersede_checkpoint: str | None
+) -> None:
+    """Only an explicitly named obsolete checkpoint may yield to a newly audited pilot."""
+    if previous_commit is None:
+        if supersede_checkpoint is not None:
+            fail("--supersede-checkpoint 没有对应的旧 pilot approval。")
+        return
+    if supersede_checkpoint != previous_commit or previous_commit == current_commit:
+        fail(
+            "已有 pilot approval; 只有显式 --supersede-checkpoint 指向不同的旧 checkpoint 才可更新。"
+        )
+
+
 def acknowledged_failures(
     phase: Literal["pilot", "batch"],
     requested: set[Path],
@@ -212,6 +235,8 @@ __all__ = [
     "Status",
     "acknowledged_failures",
     "can_launch",
+    "can_replace_approval",
+    "can_retry",
     "fail",
     "slots",
     "verify_ab",

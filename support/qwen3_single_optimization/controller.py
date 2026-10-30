@@ -34,6 +34,8 @@ from qwen3_single_optimization.core import (
     Status,
     acknowledged_failures,
     can_launch,
+    can_replace_approval,
+    can_retry,
     fail,
     slots,
     verify_ab,
@@ -665,8 +667,20 @@ def approve(args: argparse.Namespace) -> None:
     )
     with locked(spec.experiment / ".queue.lock"):
         target = spec.experiment / "pilot-approval.json"
+        previous = Approval.model_validate_json(target.read_bytes()) if target.exists() else None
+        can_replace_approval(
+            None if previous is None else previous.tested_commit,
+            spec.tested_commit,
+            args.supersede_checkpoint,
+        )
         if target.exists():
-            fail("已有 pilot approval; 不覆盖历史审查。")
+            archive = spec.experiment / "pilot-approvals" / f"{digest(target)}.json"
+            archive.parent.mkdir(exist_ok=True)
+            if archive.exists():
+                if archive.read_bytes() != target.read_bytes():
+                    fail(f"旧 approval 归档内容不符: {archive}")
+            else:
+                os.link(target, archive)
         save(spec.run / "scripts/pilot-review.json", review)
         patch = command_bytes(
             ["git", "diff", baseline.revision, candidate.revision],
@@ -681,8 +695,8 @@ def retry(args: argparse.Namespace) -> None:
     """Create a new independent attempt; never overwrite/replay the original."""
     previous = read_spec(args.run.resolve())
     with locked(previous.experiment / ".queue.lock"):
-        if read_state(previous.run).status not in {Status.FINISHED, Status.FAILED}:
-            fail("非终态 attempt 不可 retry; 先停止并核对资源。")
+        current_commit, _ = checkpoint(previous.source)
+        can_retry(read_state(previous.run), previous.tested_commit, current_commit)
         latest = latest_specs(previous.experiment, previous.slot.phase)
         if previous not in latest:
             fail("此 slot 已有更新 attempt; 不得从旧 attempt 分叉。")
@@ -748,6 +762,7 @@ def parser() -> argparse.ArgumentParser:
         sub.add_argument("--run", type=Path, required=True)
         if name == "approve-pilot":
             sub.add_argument("--review", type=Path, required=True)
+            sub.add_argument("--supersede-checkpoint")
         if name == "logs":
             sub.add_argument("--log", default="vibesys.log")
             sub.add_argument("--tail", type=int, default=80)

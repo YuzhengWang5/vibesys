@@ -17,6 +17,8 @@ from qwen3_single_optimization.core import (
     Status,
     acknowledged_failures,
     can_launch,
+    can_replace_approval,
+    can_retry,
     slots,
     verify_ab,
 )
@@ -168,6 +170,35 @@ def test_only_prepared_attempt_can_launch(status: Status) -> None:
     else:
         with pytest.raises(ValueError, match="retry"):
             can_launch(state)
+
+
+@pytest.mark.parametrize("status", Status)
+@pytest.mark.parametrize("changed", [False, True])
+def test_retry_never_replays_active_or_same_checkpoint_prepared_attempts(
+    status: Status, *, changed: bool
+) -> None:
+    state = RunState(status=status, updated_at="fixed-input")
+    current = "new" if changed else "old"
+    if status in {Status.FINISHED, Status.FAILED} or (status is Status.PREPARED and changed):
+        can_retry(state, "old", current)
+    else:
+        with pytest.raises(ValueError, match="不可 retry"):
+            can_retry(state, "old", current)
+
+
+@pytest.mark.parametrize("previous", [None, "old", "new"])
+@pytest.mark.parametrize("acknowledged", [None, "old", "new", "wrong"])
+def test_reapproval_requires_explicit_obsolete_checkpoint(
+    previous: str | None, acknowledged: str | None
+) -> None:
+    allowed = (previous is None and acknowledged is None) or (
+        previous == "old" and acknowledged == "old"
+    )
+    if allowed:
+        can_replace_approval(previous, "new", acknowledged)
+    else:
+        with pytest.raises(ValueError, match=r"approval|checkpoint"):
+            can_replace_approval(previous, "new", acknowledged)
 
 
 def test_fixed_five_round_public_launch_contract() -> None:

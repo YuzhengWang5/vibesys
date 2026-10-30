@@ -87,6 +87,13 @@ retry；应先核实原 gpuctl 进程及本 run 资源已停止，不能用修�
 显式传 `--acknowledged-failure /absolute/failed-run` 继续其余 slot；可重复指定。
 原实验仍保留 failed，不算成功，也不额外授予优化轮次。新发生的失败仍停止队列。
 基础设施故障不可据此伪装成算法失败，必须先修复并按 checkpoint/pilot 规则恢复。
+源码 checkpoint 改变后，可 `retry` 旧 pilot 新建独立 pilot；审查通过后执行
+`approve-pilot --run /new/pilot --review /new/review.json --supersede-checkpoint OLD_SHA`。
+完整重跑可信证据与源码审查，旧 approval 按内容 hash 原样保存在
+`pilot-approvals/`，再原子发布新 approval；同 checkpoint 或未显式确认旧 pin
+均拒绝替换。已完成的正式 slot 保留原测量和原 pin，不追加优化预算。
+尚未启动但 pin 已过期的 prepared slot，也须在新 pilot 审查后逐个 `retry`
+创建独立新 attempt，绝不改写旧 spec；运行中/启动不明的 attempt 不能据此 retry。
 意外 SIGKILL 留下的不明 intent 故意不自动 replay；保留证据后重新准备独立 pilot。
 所有命令应由同一操作者执行；此工具不是抵御恶意宿主操作者的安全边界。
 
