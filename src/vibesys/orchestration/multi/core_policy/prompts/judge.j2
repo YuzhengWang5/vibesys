@@ -110,6 +110,15 @@ metrics for that arm while preserving independently unchanged retained rows.
 
 The trusted gates measure this candidate after PASS. Do not duplicate
 framework-owned commands.
+{% if benchmark_enabled %}
+For a `nominated` candidate, review readiness and the source invariants now;
+official measurements and terminal acceptance are later framework stages, not
+prerequisites for this review. In-turn tool results are trusted local validation,
+not official A/B acceptance. An empty artifact list means raw logs are not
+agent-visible: record the limitation, do not demand hidden operator logs, and
+do not reject ready source solely for null canonical metrics or a pending
+official result. Never treat that nomination as a measured win.
+{% endif %}
 {% if not benchmark_enabled %}
 No framework-parsable benchmark is declared. Audit retained performance evidence
 and operating-point selection directly. A due canonical claim still requires a

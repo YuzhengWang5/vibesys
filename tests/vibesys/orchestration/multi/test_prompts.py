@@ -153,6 +153,7 @@ _PLANNING = st.builds(
     round_number=st.integers(1, 5),
     max_rounds=st.integers(5, 9),
     base_revision=_REVISIONS,
+    benchmark_enabled=st.booleans(),
     last_profile=st.none()
     | st.builds(
         LastProfile,
@@ -222,6 +223,46 @@ def test_the_planning_prompt_shows_a_fresh_profile(
     text = _render(PlanTemplate.PLAN, context)
     if context.last_profile is not None:
         assert "fresh profiler result" in text
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(context=_PLANNING)
+def test_planning_does_not_require_post_review_evidence_before_nomination(
+    context: PlanPrompt,
+) -> None:
+    text = _render(PlanTemplate.PLAN, context)
+    if context.benchmark_enabled:
+        assert "not official\nacceptance" in text
+        assert "before returning the candidate that starts those framework stages" in text
+    else:
+        assert "before returning the candidate that starts those framework stages" not in text
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(context=_IMPLEMENT)
+def test_ready_implementations_can_reach_review_without_hidden_raw_logs(
+    context: ImplementPrompt,
+) -> None:
+    text = _render(PromptTemplate.IMPLEMENT, context)
+    if context.benchmark_enabled:
+        assert "not official A/B\nacceptance" in text
+        assert "repeating an unchanged measurement to retrieve logs" in text
+        assert "return `nominated` with null canonical" in text
+    else:
+        assert "return `nominated` with null canonical" not in text
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(context=_JUDGE)
+def test_nomination_review_does_not_wait_for_its_own_post_review_gates(
+    context: JudgePrompt,
+) -> None:
+    text = _render(PromptTemplate.JUDGE, context)
+    if context.benchmark_enabled:
+        assert "not\nprerequisites for this review" in text
+        assert "Never treat that nomination as a measured win" in text
+    else:
+        assert "Never treat that nomination as a measured win" not in text
 
 
 @settings(max_examples=examples(pr=8, nightly=100))

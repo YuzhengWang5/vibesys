@@ -59,6 +59,13 @@ multi-agent registration 的 canonical codec 与公开 receipt ledger 读取真�
 填写 `pilot-review.example.json`，将已验证的四项声明改为 true。
 模板默认 false，不能不经审查直接通过。这个语义审计不能安全地自动猜测。
 
+implementer 的 in-turn evaluation 工具仍按既有契约产生 trusted
+`local-validation`，不会因为调用只写 accuracy 就跳过已配置的 benchmark；
+这些数字不能用于开闸。候选准备就绪后须提名，由框架执行 judge 和正式 gates，
+再由操作者读取 baseline/official receipt。工具的空 artifact 列表不表示宿主
+原始 stream 丢失，也不授予候选读取隐藏日志的权限；操作者通过公开 Project
+日志位置审查原始输出，不要求候选在提名前等待后置审查或虚构原始包。
+
 ```bash
 bash "$control" approve-pilot --run /absolute/pilot --review /absolute/review.json
 bash "$control" prepare batch --experiment /absolute/exps/direction

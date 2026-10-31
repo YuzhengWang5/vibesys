@@ -197,6 +197,13 @@ defects before another target call; leaf-only checks do not suffice.
 {% if benchmark_enabled %}
 The framework has a machine-readable trusted benchmark and runs it after review.
 Do not ask the implementer to duplicate that canonical command.
+Design readiness for that review separately from acceptance of the later official
+measurement. A runnable control or candidate can be nominated with null canonical
+metrics; do not require the implementer to obtain an independent review or an
+official result before returning the candidate that starts those framework stages.
+In-turn evaluation-tool measurements are trusted local validation, not official
+acceptance. Missing agent-visible raw artifacts must be recorded as unavailable,
+not made into a report-only experiment that blocks nomination of ready source.
 {% else %}
 No framework-parsable benchmark is declared. The implementer must retain raw,
 auditable performance evidence for claims that require measurement.

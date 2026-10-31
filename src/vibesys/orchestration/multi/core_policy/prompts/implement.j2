@@ -1,1 +1,17 @@
 {% if continuation_step %}{% include '_implement_continue.j2' %}{% else %}{% include '_implement_first.j2' %}{% endif %}
+{% if benchmark_enabled %}
+
+## Framework measurement order and visibility
+
+In-turn evaluation-tool results are trusted local validation, not official A/B
+acceptance. The tool runs the configured stages, including the benchmark, even
+when a call names only accuracy. Its stage records expose verdicts and metrics;
+an empty artifact list does not grant access to the operator's raw logs. Record
+that visibility gap without guessing hidden paths, inventing evidence, or
+repeating an unchanged measurement to retrieve logs.
+
+When the production source is ready, return `nominated` with null canonical
+metrics and an empty {{ reply.next_step }} so the framework can run independent
+review and official gates. Do not wait for those later stages inside this turn
+or classify ready source as blocked solely because they have not run yet.
+{% endif %}
