@@ -10,6 +10,8 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from vs_bench.logprobs import summarize_logits
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--model-dir", required=True)
 parser.add_argument("--port", type=int, required=True)
@@ -37,7 +39,7 @@ def health() -> dict:
     return {"ready": True}
 
 
-@app.post("/v1/logits")
+@app.post("/v1/logprobs")
 def logits(body: dict) -> dict:
     """Expose the native cached forward, optionally corrupting decode rows."""
     ids = torch.tensor([body["input_ids"]], device="cuda")
@@ -45,16 +47,20 @@ def logits(body: dict) -> dict:
     with torch.inference_mode():
         result = model(ids[:, :length], use_cache=True)
         cache = result.past_key_values
-        rows = [result.logits[0, -1].float().cpu().tolist()]
+        rows = [result.logits[0, -1:].float().cpu()]
         for size in body["decode_chunk_sizes"]:
             result = model(ids[:, length : length + size], past_key_values=cache, use_cache=True)
             cache = result.past_key_values
             values = result.logits[0].float()
             if args.corrupt:
                 values = values.roll(1, dims=-1)
-            rows.extend(values.cpu().tolist())
+            rows.append(values.cpu())
             length += size
-    return {"positions": list(range(body["prefill_length"] - 1, length)), "logits": rows}
+    summary = summarize_logits(torch.cat(rows).numpy(), body["reference_token_ids"])
+    return {
+        "positions": list(range(body["prefill_length"] - 1, length)),
+        "rows": [row.model_dump() for row in summary],
+    }
 
 
 @app.post("/v1/completions")

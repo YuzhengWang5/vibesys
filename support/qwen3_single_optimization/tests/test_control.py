@@ -6,7 +6,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
-from qwen3_single_optimization.controller import framework_args
+from qwen3_single_optimization.controller import framework_args, queue_lock
 from qwen3_single_optimization.core import (
     Inspection,
     Measurement,
@@ -26,6 +26,28 @@ from qwen3_single_optimization.core import (
 from vs_prompts.api import TemplateRenderer
 
 TEMPLATES = Path(__file__).parents[1] / "templates"
+
+
+def test_parallel_treatments_exclude_duplicates_and_full_queue(tmp_path: Path) -> None:
+    with (
+        queue_lock(tmp_path, Optimization.CUDA_GRAPH),
+        queue_lock(tmp_path, Optimization.FLASHINFER),
+    ):
+        with (
+            pytest.raises(BlockingIOError, match="unavailable"),
+            queue_lock(tmp_path, Optimization.CUDA_GRAPH),
+        ):
+            pytest.fail("duplicate queue admitted")
+        with pytest.raises(BlockingIOError, match="unavailable"), queue_lock(tmp_path, None):
+            pytest.fail("full queue admitted beside treatments")
+    with (
+        queue_lock(tmp_path, None),
+        pytest.raises(BlockingIOError, match="unavailable"),
+        queue_lock(tmp_path, Optimization.CUDA_GRAPH),
+    ):
+        pytest.fail("treatment queue admitted beside full queue")
+    with queue_lock(tmp_path, Optimization.CUDA_GRAPH):
+        pass
 
 
 def example_review() -> PilotReview:

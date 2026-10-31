@@ -1,77 +1,62 @@
-# 推理引擎精度门禁
+# 轻量推理引擎精度门禁
 
-此门禁替代代码答案的宽松相似度，不判断代码修复任务本身是否解对。
-标准 accuracy 工具及正式评测均调用同一 manifest 命令：
+标准 accuracy 工具、implementer 自测与 judger 正式评测均使用 manifest 命令：
 
 ```bash
 python .vibesys/tasks/default/accuracy_checker/launch.py --tokenizer-path /model --seed 42
 ```
 
-候选服务先启动、收集结果、完全停止，再加载未经修改的 Hugging Face
-`AutoModelForCausalLM`，BF16、eager attention、禁用 TF32。
-诊断 logits 使用与请求一致的 HF 原生增量计划与原生 KV cache；
-实际生成决策另用完整实际前缀的无 cache forward 核验。
-这避免同卡双份 32B 权重，且不使用候选自己的参考实现或 KV cache。
-增量计划必须匹配：原生 HF BF16 的不同 GEMM shape 本身就可能产生
-明显的全词表尾部差异，不能把 monolithic forward 当作任意分块的逐值 oracle。
-任何请求、协议、非有限值、形状或数值错误均失败，不回退到文本相似度。
-`launch.py` 在首次空候选缺少 `run_server.sh` 时先给出明确失败，
-不先为一个尚未实现的服务下载 GPU 依赖；有 launcher 时执行相同 uv managed gate。
-输出逐 case JSON 和最终 `passed`、依赖版本、固定阈值及全部诊断；
-参考与候选数组属于本次 evaluator 临时目录，退出后清理。
+门禁确认引擎大致数值正确，不判断代码编辑答案是否正确。参考是操作者独立计算、
+经 vLLM 校准并 checkpoint 的 `reference_logprobs.json`，不是候选生成的答案。
+模型 config 和权重索引 hash 必须匹配。每次评测只加载候选模型一次，不再加载 HF；
+请求只传少量 top-five 和指定 token 的 logprob，不传完整词表。
 
-## 生产服务的附加观测接口
+## 生产观测接口
 
-实现 `POST /v1/logits`，请求：
+实现 `POST /v1/logprobs`：
 
 ```json
-{"input_ids":[10,20,30,40],"prefill_length":2,"decode_chunk_sizes":[1,1]}
+{"input_ids":[10,20,30,40],"prefill_length":2,"decode_chunk_sizes":[1,1],"reference_token_ids":[7,8,9]}
 ```
 
-每次请求清空 KV；先用前 `prefill_length` 个 token 进行 prefill，再严格
-按 `decode_chunk_sizes` teacher-force 后续 token，更新真实 KV。返回
-prefill 最后一个位置及每个续写位置的**完整词表原始 logits**：
+每次请求重置 KV，prefill 前两个 token，再按给定 chunk teacher-force 后续 token。
+返回 prefill 最后位置及所有续写位置的 next-token 分布摘要：
 
 ```json
-{"positions":[1,2,3],"logits":[[0.1,0.2],[0.2,0.3],[0.3,0.4]]}
+{"positions":[1,2,3],"rows":[{"top_token_ids":[7,8,9,10,11],"top_logprobs":[-0.8,-1.8,-2.8,-3.8,-4.8],"reference_token_logprob":-0.8},{"top_token_ids":[8,9,10,11,12],"top_logprobs":[-0.8,-1.8,-2.8,-3.8,-4.8],"reference_token_logprob":-0.8},{"top_token_ids":[9,10,11,12,13],"top_logprobs":[-0.8,-1.8,-2.8,-3.8,-4.8],"reference_token_logprob":-0.8}]}
 ```
 
-示例仅展示维度；真实词表长度必须等于模型 config 的 vocab_size。
-不得归一化、裁剪、只返回 top-k 或重新编号。该接口必须使用
-`/v1/completions` 相同权重、forward、attention、精度与 KV 管理；
-优化启用时此接口也必须经过该生产路径，不能另起 HF 旁路。
-这是 implementer/judge 必须审查的实现约束；数值测试本身不能证明两条
-任意程序路径共享实现。多 token chunk 必须有正确 causal mask 和 KV 提交。
+top-five 必须为真实完整词表 softmax 后的自然对数概率，降序且 ID 唯一；
+`reference_token_logprob` 为同一行所请求的 `reference_token_ids` 的概率，即使不在
+top-five 中也必须返回。不能对 top-five 单独归一化。所有数值必须有限。
+位置 p 表示在固定 `input_ids[:p+1]` 前缀上的 next-token 分布；
+teacher-forcing 使用固定 token，不使用两个引擎各自生成的不同前缀。
 
-此外 `/v1/completions` 请求 `return_token_ids: true` 时，每个 SSE
-choice 增加 `token_ids` 数组，记录该 chunk 实际发出的 token ID（可为空）。
-其拼接按 `skip_special_tokens=True, clean_up_tokenization_spaces=False`
-decode 后必须与 SSE 文本完全一致，EOS 允许包含在 ID 中。
-普通 benchmark 不请求此字段，吞吐口径不变。
+该接口必须复用 `/v1/completions` 的真实生产模型、forward、attention、KV 管理和
+已启用优化。观测摘要可用普通 tensor 操作提取；模型计算不能绕过优化或另起 HF 旁路。
+多 token chunk 要保证因果 mask、位置编码及 KV 更新正确。路径共享须由 judger
+和操作者审查；有限数值检查本身不能证明任意候选没有实现旁路。
 
-## 覆盖与阈值
+`/v1/completions` 请求 `return_token_ids:true` 时，每个 SSE choice 返回该 chunk
+实际发出的 `token_ids`（可为空）；拼接 ID 按 `skip_special_tokens=True,
+clean_up_tokenization_spaces=False` decode 后必须与拼接文本一致，最后发送 `[DONE]`。
+普通 benchmark 不请求此字段，性能计数不变。
 
-6 种上下文，长度 32/127/256/511/1024/65，包含多语言代码、
-重复片段和 seeded 随机合法 token。每种上下文以两种增量计划各测一次：
-16 次单 token，以及 1/1/4/1/8/1 的多 token 验证；共 204 行完整词表。
-请求交替长短上下文，同时覆盖独立请求重置。额外 6 次真实 SSE 生成，
-覆盖空与非空 prediction；逐个实际发出的 token 在其实际前缀下与 HF
-比较，不能靠返回正确的诊断 logits 掩盖错误的输出选择或错误的 draft 接受。
-不足 16 token 的提前终止必须包含或接近 HF 的 EOS。
+## 强度和校准
 
-每行同时满足：
+三个短代码上下文，prefill 长度 32/128/256，各续写 8 token。每个上下文分别运行
+单 token 和 `[1,4,1,2]` chunk 计划，共六次请求、54 个 teacher-forced 位置。
+另有两次最多 8 token 的 SSE 协议确认，覆盖空和非空 prediction。不比对完整 logits、
+cosine、RMSE、尾部词表或整段生成逐字一致；允许近似并列最大值交换及优化舍入差异。
 
-| 指标 | 阈值 |
-|---|---|
-| 去均值全词表 cosine | >= 0.999 |
-| 去均值误差 L2 / 参考去均值 L2 | <= 0.045 |
-| softmax 概率 total variation | <= 0.035 |
-| 候选 argmax 在参考上的 logit regret | <= 0.25 |
+1. 至少 95% 的全部位置，同时满足 HF top-1 在候选 top-5 内，候选 top-1 在
+   HF top-5 内。54 个位置可容许两个不满足的位置；缺失位置不能缩小分母。
+2. 所有位置的 HF top-1 token，在候选与 HF 中的 logprob 绝对差不超过固定阈值。
+   vLLM/HF 最大差 <=0.2 时阈值为 0.2，否则阈值为 vLLM 最大差 +0.2。
+   原始校准值、版本与最终阈值保存在参考 JSON，不根据实验候选失败调整。
 
-实际生成 token 的参考 logit regret 同样 <= 0.25。这样允许 BF16
-算子舍入及接近并列最大值的交换，同时约束全词表形状、概率质量和
-greedy 决策；每行独立通过，不能以平均值掩盖错误 token。常数 logits、
-NaN、Inf、错位或截断的词表直接失败。固定阈值的正确引擎正例与数值
-破坏负例必须先校验；不得因候选失败而临时放宽阈值。
-
-这是一组较强的有限数值回归测试，不是对所有输入的形式化正确性证明。
+双向 top-k 思路参考 vLLM `tests/models/utils.py:check_logprobs_close`。
+95% 汇总与数值阈值是本实验的轻量策略，不声称是 vLLM 原函数的默认策略。
+HF 原生 BF16 eager 使用相同 cached-forward 计划；vLLM 校准在每个相同前缀后
+teacher-force HF top-1，使用 prompt logprobs 取得该 token 和完整分布 top-five。
+准备与正负控制见源码 `support/qwen3_gate_validation/`；这些操作者脚本不提供给候选。

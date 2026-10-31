@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from qwen3_single_optimization.core import (
     Approval,
     Inspection,
+    Optimization,
     PilotReview,
     RunSpec,
     RunState,
@@ -126,14 +127,26 @@ def records(spec: RunSpec, state: RunState) -> None:
 
 
 @contextmanager
-def locked(path: Path) -> Iterator[None]:
+def locked(path: Path, *, shared: bool = False) -> Iterator[None]:
     """Own one queue or execution; refuse rather than wait with an idle GPU lease."""
     with path.open("a") as stream:
-        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
+        fcntl.flock(stream, mode | fcntl.LOCK_NB)
         try:
             yield
         finally:
             fcntl.flock(stream, fcntl.LOCK_UN)
+
+
+@contextmanager
+def queue_lock(experiment: Path, optimization: Optimization | None) -> Iterator[None]:
+    """Allow distinct treatments concurrently, but exclude duplicate/full-plan writers."""
+    with locked(experiment / ".queue.lock", shared=optimization is not None):
+        if optimization is None:
+            yield
+        else:
+            with locked(experiment / f".queue-{optimization}.lock"):
+                yield
 
 
 def checkpoint(source: Path, expected: str | None = None) -> tuple[str, str]:
@@ -211,8 +224,13 @@ def export_candidate(source: Path, project: Path, head: str, slot: Slot) -> str:
         copy_directory=copy_directory,
     )
     objective = clean_docs(project, slot.optimization.value)
-    if "/v1/logits" not in (project / TASK / "accuracy_checker/README.md").read_text():
-        fail("导出 bundle 尚无新 logits accuracy gate; 拒绝准备。")
+    if "/v1/logprobs" not in (project / TASK / "accuracy_checker/README.md").read_text():
+        fail("导出 bundle 尚无新 logprob accuracy gate; 拒绝准备。")
+    reference = json.loads(
+        (project / TASK / "accuracy_checker/reference_logprobs.json").read_text()
+    )
+    if reference["calibration"]["status"] != "measured":
+        fail("HF/vLLM 参考尚未完成校准; 拒绝准备。")
     command(["git", "init", "-q", "-b", "main"], cwd=project)
     command(["git", "config", "user.name", "wangyuzheng"], cwd=project)
     command(["git", "config", "user.email", "yuuzhwang@gmail.com"], cwd=project)
@@ -567,21 +585,32 @@ def execute(spec: RunSpec) -> None:
 
 
 def worker(args: argparse.Namespace) -> None:
-    """Consume one durable intent under the experiment's serial execution lock."""
+    """Consume one durable intent; independent candidates may use independent leases."""
     spec = read_spec(args.run.resolve())
-    with locked(spec.experiment / ".execution.lock"):
+    with locked(spec.run / ".execution.lock"):
         execute(spec)
 
 
+def planned_queue(experiment: Path, phase: str, optimization: Optimization | None) -> list[RunSpec]:
+    """Validate the whole plan before selecting an independently leased treatment queue."""
+    if optimization is not None and phase != "batch":
+        fail("--optimization 只适用于已通过 pilot 审查的正式 batch。")
+    planned = latest_specs(experiment, phase)
+    if len(planned) != len(slots(phase)):
+        fail("准备的 slot 不完整; 不启动部分 batch。")
+    if phase == "batch":
+        load_approval(experiment, planned[0].source)
+    return [
+        spec for spec in planned if optimization is None or spec.slot.optimization == optimization
+    ]
+
+
 def queue(args: argparse.Namespace) -> None:
-    """Run each pending slot once, serially; stop on a failed or uncertain attempt."""
+    """Run each pending slot once; separate treatment queues may proceed concurrently."""
     experiment = args.experiment.resolve()
-    with locked(experiment / ".queue.lock"):
-        planned = latest_specs(experiment, args.phase)
-        if len(planned) != len(slots(args.phase)):
-            fail("准备的 slot 不完整; 不启动部分 batch。")
-        if args.phase == "batch":
-            load_approval(experiment, planned[0].source)
+    optimization = args.optimization
+    with queue_lock(experiment, optimization):
+        planned = planned_queue(experiment, args.phase, optimization)
         acknowledged = acknowledged_failures(
             args.phase,
             {path.resolve() for path in args.acknowledged_failure},
@@ -749,6 +778,7 @@ def parser() -> argparse.ArgumentParser:
         sub.add_argument("--experiment", type=Path, required=True)
         if name == "queue":
             sub.add_argument("--phase", choices=("pilot", "batch"), required=True)
+            sub.add_argument("--optimization", type=Optimization, choices=list(Optimization))
             sub.add_argument("--acknowledged-failure", type=Path, action="append", default=[])
         sub.set_defaults(function=function)
     for name, function in (

@@ -25,8 +25,8 @@
   是否使用该提示必须遵守本次唯一优化边界。
 - SSE 文本必须正确重建输出，不得截断合法 Unicode、虚构字符或重放缓存答案。
   chunk 数不是 token 数。
-- 完整实现只读 `accuracy_checker/README.md` 规定的生产 logits 观测接口
+- 完整实现只读 `accuracy_checker/README.md` 规定的 teacher-forced logprob 观测接口
   及 SSE token ID 观测。观测必须经过同一生产 forward、权重、attention、
   KV 管理和实际启用的优化，禁止另起参考模型旁路。
-- 使用 manifest 的标准 accuracy 工具核验原生 Hugging Face BF16 logits
+- 使用 manifest 的标准 accuracy 工具核验原生 Hugging Face BF16 logprobs
   和实际生成决策。不得修改、替换、弱化 checker、参考模型、阈值或 benchmark。

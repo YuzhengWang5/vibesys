@@ -18,7 +18,7 @@ bash support/qwen3_single_optimization/control.sh prepare pilot
 框架源码不在 candidate 内，无旧实验代码或历史。SDK 通过
 `materialize_input_project` 公开 API 准备，保留 skills。
 清理后的 OBJECTIVE、root/benchmark/reference README 均由模板生成；
-评测实现及新 gate 保持原样。新 checker 动态计算 HF 参考，不依赖预生成 npz。
+评测实现及新 gate 保持原样。新 checker 使用经过独立 HF/vLLM 校准的固定参考。
 
 ```bash
 control=support/qwen3_single_optimization/control.sh
@@ -28,7 +28,11 @@ bash "$control" logs --run /absolute/pilot --tail 100
 bash "$control" inspect --run /absolute/pilot
 ```
 
-队列串行；gpuctl 为每次 run 全程租一张卡，最多等待租约 12 小时。
+默认队列串行；正式 batch 可分别传 `--optimization cuda-graph`、
+`--optimization speculative-decoding`、`--optimization flashinfer`、
+`--optimization operator-fusion`，同时开启四个独立方向队列，每个方向内部串行五次。
+每 run 有独立执行锁，重复启动同一 run 会拒绝；gpuctl 为每次 run 全程租一张卡，
+最多等待租约 12 小时。不要同时启动默认全量队列和分方向队列。
 启动前保存 nvidia-smi，显式记录/export CUDA_VISIBLE_DEVICES，拒绝卡上已有计算进程。
 每次框架预算固定 outer-loop=agent、Copilot CLI gpt-6.1-sol、
 max-rounds=5、max-in-flight=1、evaluation-slots=1；单 run 安全墙钟上限 6 小时。
@@ -50,7 +54,7 @@ multi-agent registration 的 canonical codec 与公开 receipt ledger 读取真�
 不是 dynamic；max-in-flight/evaluation-slots/max-backlog 这些 CLI 项在此路径
 不进入 policy descriptor，实际串行性由该策略和操作者队列保证。
 
-数值证据不能证明任意程序只改变一个因素或 logits 真正共享生产 forward。
+数值证据不能证明任意程序只改变一个因素或 logprobs 真正共享生产 forward。
 操作者必须审查 A/B 源码 diff、未经优化 eager BF16 AR 基线及生产路径，
 填写 `pilot-review.example.json`，将已验证的四项声明改为 true。
 模板默认 false，不能不经审查直接通过。这个语义审计不能安全地自动猜测。

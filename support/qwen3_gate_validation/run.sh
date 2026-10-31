@@ -8,6 +8,7 @@ printf '\nCUDA_VISIBLE_DEVICES=%s\n' "$CUDA_VISIBLE_DEVICES" >> "$run/README.md"
 for control in positive negative; do
   mkdir -p "$run/$control"
   cp -a "$repo/examples/model-serving/qwen3-32b-code-edit/.vibesys" "$run/$control/"
+  cp "$run/logs/reference_logprobs.json" "$run/$control/.vibesys/tasks/default/accuracy_checker/"
   cp "$repo/support/qwen3_gate_validation/launcher.sh" "$run/$control/run_server.sh"
   extra=0
   if [[ "$control" == negative ]]; then extra=1; fi
@@ -16,7 +17,7 @@ for control in positive negative; do
     -v "$repo:/source:ro" -v "$run:/run" -v /mnt_ssd/data1/models/Qwen3-32B:/model:ro \
     -e CUDA_VISIBLE_DEVICES=0 -e CONTROL_CORRUPT="$extra" \
     -e PYTHONPATH=/source/sdk/vs-bench/src \
-    -w "/run/$control" vibesys-qwen3-logits-validation:20261029 \
+    -w "/run/$control" vibesys-qwen3-logprob-validation:20261031 \
     python .vibesys/tasks/default/accuracy_checker/checker.py --managed \
     --tokenizer-path /model --seed 42 > "$run/logs/$control.log" 2>&1
   status=$?

@@ -24,8 +24,8 @@ qwen3-32b-code-edit/
     │   ├── benchmark.py               # /v1/completions driver, single-batch
     │   └── README.md
     ├── accuracy_checker/
-    │   ├── checker.py                 # native HF logits and production token gate
-    │   ├── reference_logits.py        # independent native HF numerical reference
+    │   ├── checker.py                 # teacher-forced top-five/logprob gate
+    │   ├── reference_logprobs.json    # pinned independent HF/vLLM calibration
     │   └── README.md
     └── reference/
         ├── README.md                  # how to mount the target model
@@ -59,8 +59,8 @@ must return HTTP 200 from `/health` only after the real model is ready.
 
 Both manifest commands use `managed_evaluation.py`: it launches the submitted
 candidate, waits up to 900 seconds for readiness, runs the client,
-then stops the service and its descendants. Accuracy subsequently loads the
-native HF reference after candidate cleanup. Accuracy and benchmark each use a
+then stops the service and its descendants. Accuracy uses a pinned, independently
+calibrated HF reference without loading a second model. Accuracy and benchmark each use a
 fresh container; a service started in an agent's container is not available
 in a formal evaluation container. Stop self-test services before submitting
 formal evaluation to avoid loading two models onto the allocated GPU.
@@ -93,10 +93,10 @@ The bench prints the headline `Primary metric: median_tok_per_sec = ...` line an
 
 ## Accuracy gate
 
-The checker compares full-vocabulary production logits and streamed token
-decisions with native Hugging Face BF16 inference. Its numerical tolerances,
+The checker compares teacher-forced production top-five and reference-top-one
+logprobs with native Hugging Face BF16 inference. Its numerical tolerances,
 KV-cache coverage and required observation interface are specified in
 `accuracy_checker/README.md`. The accuracy manifest owns service startup,
-cleanup and sequential reference-model loading.
+cleanup. Independent HF/vLLM calibration is performed once, not per candidate.
 The benchmark separately records verbatim echo and improvement-over-input
 statistics; retain those statistics alongside throughput.
