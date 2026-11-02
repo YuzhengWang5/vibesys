@@ -41,7 +41,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from vs_agent.api import (
-    CONTAINER_FRAMEWORK_ROOT,
     AgentBackend,
     auth_bind_mounts,
     auth_copy_paths,
@@ -59,6 +58,7 @@ from vs_runtime._container_runtime_policy import (
     attaches_accelerator,
     reject_docker_in_docker,
 )
+from vs_runtime._container_visibility import framework_resources, project_visibility_resources
 from vs_runtime._docker_evaluator_tools import (
     DockerToolBuilder,
     prepare_docker_evaluator_resources,
@@ -125,7 +125,6 @@ from vs_sandbox.api import (
 )
 from vs_sandbox.api.docker_workspace import (
     DockerWorkspaceRepairError,
-    docker_project_path_resources,
     remove_docker_workspace_child,
     repair_docker_workspace,
 )
@@ -1862,9 +1861,10 @@ def _container_mount_plan(
         for host, container, read_only in bind_mounts
     ]
     resources.extend(
-        docker_project_path_resources(
+        project_visibility_resources(
             request.project_path_policy,
             request.workspace,
+            request.git_history_root,
             mask_root=request.log_dir / "sandbox-hidden",
             container_root=root,
         )
@@ -1888,9 +1888,9 @@ def _container_mount_plan(
             host_resource_for_mount(host, container, read_only=read_only)
             for host, container, read_only in auth_bind_mounts(request.cli_provider)
         )
-        resources.append(
-            host_resource_for_mount(
-                str(request.framework_root), CONTAINER_FRAMEWORK_ROOT, read_only=True
+        resources.extend(
+            framework_resources(
+                request.framework_root, mask_root=request.log_dir / "framework-hidden"
             )
         )
 
