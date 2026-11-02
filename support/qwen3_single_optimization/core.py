@@ -43,11 +43,11 @@ def fail(message: str) -> NoReturn:
 
 
 class Slot(Contract):
-    """One of the fixed pilot or twenty batch positions."""
+    """One pilot or one of twelve independent formal trial positions."""
 
     phase: Literal["pilot", "batch"]
     optimization: Optimization
-    repeat: int = Field(ge=1, le=5)
+    repeat: int = Field(ge=1, le=3)
 
 
 class RunSpec(Contract):
@@ -142,13 +142,13 @@ class Approval(Contract):
 
 
 def slots(phase: Literal["pilot", "batch"]) -> tuple[Slot, ...]:
-    """Return one pilot or exactly five independent repeats per treatment."""
+    """Return one pilot or three trials per treatment, in fair repeat rounds."""
     if phase == "pilot":
         return (Slot(phase="pilot", optimization=Optimization.CUDA_GRAPH, repeat=1),)
     return tuple(
         Slot(phase="batch", optimization=optimization, repeat=repeat)
+        for repeat in range(1, 4)
         for optimization in Optimization
-        for repeat in range(1, 6)
     )
 
 

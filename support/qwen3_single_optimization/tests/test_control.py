@@ -170,11 +170,14 @@ def test_objective_names_only_the_assigned_treatment(optimization: Optimization)
 def test_batch_repeats_one_macro_goal_without_old_combination() -> None:
     assert len(slots("pilot")) == 1
     batch = slots("batch")
-    assert len(batch) == 20
+    assert len(batch) == 12
     for optimization in Optimization:
         assert [item.repeat for item in batch if item.optimization == optimization] == list(
-            range(1, 6)
+            range(1, 4)
         )
+    assert [(item.repeat, item.optimization) for item in batch] == [
+        (repeat, optimization) for repeat in range(1, 4) for optimization in Optimization
+    ]
     renderer = TemplateRenderer(TEMPLATES)
     for document in ("root", "reference", "benchmark"):
         rendered = renderer.render_template("candidate-doc.md.j2", document=document)
@@ -305,6 +308,9 @@ def test_fixed_five_round_public_launch_contract() -> None:
     }.items():
         assert args[args.index(flag) + 1] == value
     assert "--no-skills" not in args
+    assert {args[index + 1] for index, value in enumerate(args) if value == "--role-model"} == {
+        f"{role}=gpt-6.1-sol" for role in ("orchestrator", "profiler", "implementer", "judge")
+    }
     with pytest.raises(ValidationError):
         RunSpec.model_validate({**spec.model_dump(), "max_rounds": 24})
 
