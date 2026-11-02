@@ -6,7 +6,7 @@
   "baseline_evidence_id": "从 inspect 填写",
   "candidate_evidence_id": "从 inspect 填写",
   "reviewer": "填写实际操作者",
-  "audit": "填写源码 diff、生产 forward 共享、基线未优化和唯一因素审计的具体证据，不接受仅复述 agent 结论。",
+  "audit": "填写源码 diff、真实生产模型 BF16 forward 路径（不是额外 logprob 接口）、无 echo/回放、HF eager AR 基线未优化和唯一因素审计证据，不接受仅复述 agent 结论。",
   "eager_bf16_ar_baseline": false,
   "only_assigned_optimization": false,
   "production_logits_shared_forward": false,

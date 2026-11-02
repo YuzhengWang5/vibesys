@@ -6,7 +6,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
-from qwen3_single_optimization.controller import framework_args, queue_lock
+from qwen3_single_optimization.controller import framework_args, queue_lock, verify_original_gate
 from qwen3_single_optimization.core import (
     Inspection,
     Measurement,
@@ -26,6 +26,55 @@ from qwen3_single_optimization.core import (
 from vs_prompts.api import TemplateRenderer
 
 TEMPLATES = Path(__file__).parents[1] / "templates"
+ROOT = Path(__file__).resolve().parents[3]
+TASK = Path(".vibesys/tasks/default")
+
+
+def test_original_gate_export_needs_no_calibration_or_observation_interface(tmp_path: Path) -> None:
+    bundle = ROOT / "examples/model-serving/qwen3-32b-code-edit"
+    for relative in ("accuracy_checker/checker.py", "vibesys.input.toml"):
+        destination = tmp_path / TASK / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((bundle / TASK / relative).read_bytes())
+    verify_original_gate(tmp_path)
+    checker = tmp_path / TASK / "accuracy_checker/checker.py"
+    checker.write_bytes(checker.read_bytes() + b"\n")
+    with pytest.raises(ValueError, match="checker hash"):
+        verify_original_gate(tmp_path)
+
+
+def test_bundle_documents_match_the_single_optimization_templates() -> None:
+    bundle = ROOT / "examples/model-serving/qwen3-32b-code-edit"
+    renderer = TemplateRenderer(TEMPLATES)
+    assert (bundle / TASK / "OBJECTIVE.md").read_text() == renderer.render_template(
+        "OBJECTIVE.md.j2", optimization=Optimization.CUDA_GRAPH.value
+    )
+    for document, relative in (
+        ("root", Path("README.md")),
+        ("reference", TASK / "reference/README.md"),
+        ("benchmark", TASK / "benchmark/README.md"),
+    ):
+        assert (bundle / relative).read_text() == renderer.render_template(
+            "candidate-doc.md.j2", document=document
+        )
+
+
+@pytest.mark.parametrize(
+    "extra", ['"--seed", "42"', '"--num-samples", "50"', '"--max-tokens", "8"']
+)
+def test_export_rejects_accuracy_default_overrides(tmp_path: Path, extra: str) -> None:
+    bundle = ROOT / "examples/model-serving/qwen3-32b-code-edit"
+    checker = tmp_path / TASK / "accuracy_checker/checker.py"
+    checker.parent.mkdir(parents=True)
+    checker.write_bytes((bundle / TASK / "accuracy_checker/checker.py").read_bytes())
+    manifest = (bundle / TASK / "vibesys.input.toml").read_text()
+    (tmp_path / TASK / "vibesys.input.toml").write_text(
+        manifest.replace(
+            '"--tokenizer-path", "/model"]', f'"--tokenizer-path", "/model", {extra}]', 1
+        )
+    )
+    with pytest.raises(ValueError, match="默认参数"):
+        verify_original_gate(tmp_path)
 
 
 def test_parallel_treatments_exclude_duplicates_and_full_queue(tmp_path: Path) -> None:
@@ -112,7 +161,10 @@ def test_objective_names_only_the_assigned_treatment(optimization: Optimization)
     assert "自然产生" not in rendered
     assert "生产 forward" in rendered
     assert "eager BF16" in rendered
-    assert "HF 旁路" in rendered
+    assert "真实 Hugging Face" in rendered
+    assert "/v1/logprobs" not in rendered
+    assert "return_token_ids" not in rendered
+    assert "A/B" not in rendered
 
 
 def test_batch_repeats_one_macro_goal_without_old_combination() -> None:
@@ -129,6 +181,8 @@ def test_batch_repeats_one_macro_goal_without_old_combination() -> None:
         assert not any(item.value in rendered for item in Optimization)
         assert "K16" not in rendered
         assert "use_cuda_graph" not in rendered
+        assert "/v1/logprobs" not in rendered
+        assert "return_token_ids" not in rendered
 
 
 @given(

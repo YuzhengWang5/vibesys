@@ -7,11 +7,20 @@ checkpoint 独立导出，不含旧实验实现或 Git 历史。
 服务契约：前台 `run_server.sh --model-dir /model --port PORT`；
 `/health` 在真实模型就绪后返回 200；实现 OpenAI 风格流式 `/v1/completions`。
 工作负载固定为 CodeEditorBench code-debug、单请求、concurrency=1；
-保持 BF16、greedy、禁用 thinking 和模型 token 计数。请求里的 prediction 字段
+先建立真实 Hugging Face eager BF16 AR 基线；保持 BF16、greedy、禁用 thinking 和模型 token 计数。请求里的 prediction 字段
 不强制实现任何机制；允许范围完全由本次 OBJECTIVE 决定。
 
 可信 accuracy/benchmark 通过任务 manifest 调用，不得修改。
-详见 accuracy_checker/README.md 的 teacher-forced logprobs 和 SSE token_ids 协议。
+详见 accuracy_checker/README.md 的原始 CodeEditorBench gold-similarity 门禁。
+
+wrapper 在可信 stderr 输出 `__VIBESYS_MANAGED_TIMING__` JSON：
+`startup_seconds` 是启动到 health ready，`client_subprocess_seconds` 是完整客户端
+子进程时间，`managed_seconds` 包含清理。不改变 benchmark token 计数或吞吐。
+`phase`、`returncode` 和 `client_returncode` 记录阶段与结果；未执行或未知值为 null。
+直调 Python 脚本时 `checker_seconds` 记录该检查子进程时间；命令含 uv 依赖解析时，
+只能记录完整子进程时间，`checker_seconds` 为 null，不能声称已拆出纯检查时间。
+`dependency_cold_start_seconds`、`model_load_seconds` 和 wrapper 外层
+`outer_environment_seconds` 均为 null；外层 uv 冷启动只能另取可信 receipt/stream 时间。
 {% elif document == "benchmark" %}
 # 固定吞吐评测
 
@@ -19,14 +28,14 @@ checkpoint 独立导出，不含旧实验实现或 Git 历史。
 保持既有 CodeEditorBench code-debug、concurrency=1、seed=42、
 50 samples、warmup=3、max_tokens=512 与流式模型 token 统计。
 prediction 是工作负载输入，不规定算法或授权额外优化。
-只执行 OBJECTIVE 指定的唯一优化；先可信测量 eager BF16 AR 基线，再单因素 A/B。
+只执行 OBJECTIVE 指定的唯一优化；先可信测量真实 HF eager BF16 AR 基线。
 保留原始输出、逐样本统计与可信 evidence；不得修改客户端实现或测量口径。
 {% elif document == "reference" %}
 # Qwen3-32B 固定参考
 
 模型权重只读挂载 `/model`，使用 Qwen/Qwen3-32B BF16，禁用 thinking。
 本目录的 config、reference.py、meta.json 是模型说明，不是优化实现路线。
-可信精度参考由操作者独立计算、校准并固定，checker 不重复加载 HF 模型。
-具体协议和阈值以相邻 accuracy_checker/README.md 为准，不得改变可信评测。
-候选 `/v1/logprobs` 必须调用自己的真实生产 forward，不能调用另一个 HF 参考旁路。
+可信精度参考是 CodeEditorBench 原始 gold 修复代码，checker 不加载第二个模型。
+具体规则和阈值以相邻 accuracy_checker/README.md 为准，不得改变可信评测。
+服务输出必须来自真实生产模型 forward，不得 echo 输入、查表或回放历史答案。
 {% endif %}

@@ -16,19 +16,24 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--model-dir", required=True)
 parser.add_argument("--port", type=int, required=True)
 parser.add_argument("--corrupt", action="store_true")
+parser.add_argument("--echo", action="store_true")
 args = parser.parse_args()
 torch.backends.cuda.matmul.allow_tf32 = False
 tokenizer = AutoTokenizer.from_pretrained(args.model_dir)
 model = (
-    AutoModelForCausalLM.from_pretrained(
-        args.model_dir,
-        torch_dtype=torch.bfloat16,
-        attn_implementation="eager",
+    None
+    if args.echo
+    else (
+        AutoModelForCausalLM.from_pretrained(
+            args.model_dir,
+            torch_dtype=torch.bfloat16,
+            attn_implementation="eager",
+        )
+        .to("cuda")
+        .eval()
     )
-    .to("cuda")
-    .eval()
 )
-eos = model.generation_config.eos_token_id
+eos = [] if model is None else model.generation_config.eos_token_id
 eos = [eos] if isinstance(eos, int) else eos
 app = FastAPI()
 
@@ -42,6 +47,9 @@ def health() -> dict:
 @app.post("/v1/logprobs")
 def logits(body: dict) -> dict:
     """Expose the native cached forward, optionally corrupting decode rows."""
+    if model is None:
+        message = "echo 负控制没有生产模型或 logprob 接口"
+        raise ValueError(message)
     ids = torch.tensor([body["input_ids"]], device="cuda")
     length = body["prefill_length"]
     with torch.inference_mode():
@@ -68,6 +76,11 @@ def completions(body: dict) -> StreamingResponse:
     """Stream native greedy decisions from the same model."""
 
     def events() -> Iterator[str]:
+        if args.echo:
+            text = body.get("prediction", {}).get("content", "")
+            yield "data: " + json.dumps({"choices": [{"text": text}]}) + "\n\n"
+            yield "data: [DONE]\n\n"
+            return
         ids = tokenizer(body["prompt"], return_tensors="pt", add_special_tokens=False).input_ids.to(
             "cuda"
         )
@@ -85,7 +98,10 @@ def completions(body: dict) -> StreamingResponse:
         text = tokenizer.decode(
             generated, skip_special_tokens=True, clean_up_tokenization_spaces=False
         )
-        yield "data: " + json.dumps({"choices": [{"text": text, "token_ids": generated}]}) + "\n\n"
+        choice = {"text": text}
+        if body.get("return_token_ids"):
+            choice["token_ids"] = generated
+        yield "data: " + json.dumps({"choices": [choice]}) + "\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(events(), media_type="text/event-stream")

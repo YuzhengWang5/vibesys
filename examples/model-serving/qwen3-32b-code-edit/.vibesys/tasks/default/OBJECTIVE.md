@@ -1,32 +1,30 @@
-# 单一优化：CUDA Graph
+# Qwen3-32B：cuda-graph 单因素实验
 
-在 Qwen/Qwen3-32B 的 code-debug 工作负载上提高单请求、concurrency=1 的
-端到端 completion throughput。唯一性能指标为原始 benchmark JSON 的
-`median_tok_per_sec`，按拼接输出重新 tokenize 计数。
+本次唯一允许的宏观优化是 **cuda-graph**。先修正确性与工程问题，
+再只围绕该优化持续迭代，直至完成可信验证或预算耗尽。
+不得加入第二种优化，不得以“生产 floor”、参考资料建议或框架默认习惯扩大范围。
 
-本次唯一允许的宏观性能优化是 **CUDA Graph**。整个 agent outerloop
-预算为 5 轮，只围绕这一项实现、排障和验证，直到跑通并观察到可归因的
-优化效果；不得转向或叠加任何其他性能机制。必要的服务、依赖和正确性修复
-可以进行，但不得伪装成初始化而引入额外优化。
+先构建真实 Hugging Face 未经优化的 eager BF16 自回归（AR）生产服务基线，完成可信 accuracy 和
+benchmark 并保留其不可变 revision、日志与测量证据；然后仅改变本次唯一因素，
+保持同一模型、权重、精度、设备、工作负载、参数与测量口径。
+不要把已有优化引擎、其他实验代码或历史当成起点。不得改变计算精度、改变题目、
+缩减评测、复用历史答案或绕过门禁。预算内先提交基线正式评测，再提交优化候选正式评测；
+agent 自测结果不能代替框架可信测量。最终记录实现 revision 与可信 evidence 标识。
 
-先建立并测量未优化的 BF16 eager 自回归服务基线，保持原始权重和计算精度。
-随后仅实施上述唯一优化，用同一 workload、设备、精度和评测命令进行
-未优化/优化生产路径 A/B。记录真实激活证据和吞吐差异；无提升或未通过
-正确性时如实报告，不把不同配置、额外机制或噪声归因为本次优化。
+目标模型为 Qwen/Qwen3-32B，权重挂载于 `/model`。保持单请求、concurrency=1，
+优化 `.vibesys/tasks/default/benchmark/benchmark.py` 的 `median_tok_per_sec`。
+benchmark 请求可含 `prediction.content`；它是输入数据，而不是额外优化的授权。
+服务实现 `run_server.sh --model-dir /model --port PORT`，保持前台运行，
+真实模型就绪后 `/health` 才返回 200。禁用 thinking，保持原始 SSE 与 model-token 计数。
+每个模型输出 token 必须具有生产模型计算依据，不得 echo 输入、查表或回放已完成请求的输出。
 
-## 生产服务与精度
+精度以 `.vibesys/tasks/default/accuracy_checker/README.md` 的原始 CodeEditorBench 门禁为准：
+steady 样本中至少 50% 的输出与 gold 的 SequenceMatcher 相似度达到 0.50，
+且 steady 请求无错误。保持 checker 原始样本、warmup、生成参数和随机 seed 默认。
+`/v1/completions` 必须经过真实生产 forward、原始权重和 BF16 精度，
+实际启用的优化必须位于这条生产模型路径，不能用独立参考路径掩盖生产错误。
+不得修改 checker、reference、manifest、benchmark、SDK 或任何可信评测内容，
+不得调整阈值。数值通过不代替代码路径审查；最终明确给出生产路径及唯一因素审计证据。
 
-- 项目根提供前台 `run_server.sh --model-dir /model --port PORT`；
-  `/health` 在真实模型就绪后才返回 200。正式评测每次使用新环境，
-  不依赖遗留服务。提交评测前停止自测服务，避免同卡双份模型。
-- 提供 streaming `POST /v1/completions`；`prompt_is_preformatted=true`
-  时原样 tokenize，不再套 chat template。关闭 thinking。
-- 接受 `prediction.content`，它只是请求中的候选文本提示，不属于 prompt；
-  是否使用该提示必须遵守本次唯一优化边界。
-- SSE 文本必须正确重建输出，不得截断合法 Unicode、虚构字符或重放缓存答案。
-  chunk 数不是 token 数。
-- 完整实现只读 `accuracy_checker/README.md` 规定的 teacher-forced logprob 观测接口
-  及 SSE token ID 观测。观测必须经过同一生产 forward、权重、attention、
-  KV 管理和实际启用的优化，禁止另起参考模型旁路。
-- 使用 manifest 的标准 accuracy 工具核验原生 Hugging Face BF16 logprobs
-  和实际生成决策。不得修改、替换、弱化 checker、参考模型、阈值或 benchmark。
+完成后保留未经优化基线和优化候选的源码、准确性与吞吐证据、激活证据及局限。
+若未通过可信验证，应如实报告失败，不得宣称成功。

@@ -19,6 +19,7 @@ import shutil
 import signal
 import sys
 import tarfile
+import tomllib
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -212,6 +213,29 @@ def trusted_files(project: Path) -> dict[str, str]:
     return {path.relative_to(project).as_posix(): digest(path) for path in sorted(paths)}
 
 
+def verify_original_gate(project: Path) -> None:
+    """Reject original-checker byte drift or overrides of its generation defaults."""
+    checker = project / TASK / "accuracy_checker/checker.py"
+    expected = "716f21093c6da5c187fa9e9a56ab80f565c07a6d08d1184dd4a7055bb11c3c45"
+    if digest(checker) != expected:
+        fail(f"{checker}: 原始 CodeEditorBench checker hash 不匹配; 拒绝准备。")
+    manifest = project / TASK / "vibesys.input.toml"
+    accuracy = tomllib.loads(manifest.read_text())["accuracy"]["command"]
+    expected_command = [
+        "python",
+        "${PROJECT_ROOT}/.vibesys/tasks/default/managed_evaluation.py",
+        "--",
+        "uv",
+        "run",
+        "python",
+        "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/checker.py",
+        "--tokenizer-path",
+        "/model",
+    ]
+    if accuracy != expected_command:
+        fail(f"{manifest}: accuracy 必须保留原始 checker 默认参数和随机 seed; 拒绝准备。")
+
+
 def export_candidate(source: Path, project: Path, head: str, slot: Slot) -> str:
     """Export a clean bundle and initialize new independent candidate history."""
     archive = command_bytes(["git", "archive", f"{head}:{BUNDLE}"], cwd=source)
@@ -224,13 +248,7 @@ def export_candidate(source: Path, project: Path, head: str, slot: Slot) -> str:
         copy_directory=copy_directory,
     )
     objective = clean_docs(project, slot.optimization.value)
-    if "/v1/logprobs" not in (project / TASK / "accuracy_checker/README.md").read_text():
-        fail("导出 bundle 尚无新 logprob accuracy gate; 拒绝准备。")
-    reference = json.loads(
-        (project / TASK / "accuracy_checker/reference_logprobs.json").read_text()
-    )
-    if reference["calibration"]["status"] != "measured":
-        fail("HF/vLLM 参考尚未完成校准; 拒绝准备。")
+    verify_original_gate(project)
     command(["git", "init", "-q", "-b", "main"], cwd=project)
     command(["git", "config", "user.name", "wangyuzheng"], cwd=project)
     command(["git", "config", "user.email", "yuuzhwang@gmail.com"], cwd=project)

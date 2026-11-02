@@ -18,7 +18,9 @@ bash support/qwen3_single_optimization/control.sh prepare pilot
 框架源码不在 candidate 内，无旧实验代码或历史。SDK 通过
 `materialize_input_project` 公开 API 准备，保留 skills。
 清理后的 OBJECTIVE、root/benchmark/reference README 均由模板生成；
-评测实现及新 gate 保持原样。新 checker 使用经过独立 HF/vLLM 校准的固定参考。
+评测实现保持原样。checker 逐字节恢复 commit `3c8833a8` 的原始 CodeEditorBench
+gold-similarity 门禁，导出时校验 SHA256；accuracy 默认 10/2/512、随机 seed，
+benchmark 固定 50/3/512、seed=42。原始宽松 gate 的局限见 accuracy README。
 
 ```bash
 control=support/qwen3_single_optimization/control.sh
@@ -54,10 +56,13 @@ multi-agent registration 的 canonical codec 与公开 receipt ledger 读取真�
 不是 dynamic；max-in-flight/evaluation-slots/max-backlog 这些 CLI 项在此路径
 不进入 policy descriptor，实际串行性由该策略和操作者队列保证。
 
-数值证据不能证明任意程序只改变一个因素或 logprobs 真正共享生产 forward。
+数值证据不能证明任意程序只改变一个因素或真正调用生产模型 forward。
 操作者必须审查 A/B 源码 diff、未经优化 eager BF16 AR 基线及生产路径，
 填写 `pilot-review.example.json`，将已验证的四项声明改为 true。
-模板默认 false，不能不经审查直接通过。这个语义审计不能安全地自动猜测。
+模板默认 false，不能不经审查直接通过。为兼容审查记录，字段名
+`production_logits_shared_forward` 保留，但在本组表示真实生产模型路径、原始权重和
+BF16 forward 的通用审查，不要求额外 logits/logprob 接口；不得 echo 或回放。
+这个语义审计不能安全地自动猜测。
 
 implementer 的 in-turn evaluation 工具仍按既有契约产生 trusted
 `local-validation`，不会因为调用只写 accuracy 就跳过已配置的 benchmark；
