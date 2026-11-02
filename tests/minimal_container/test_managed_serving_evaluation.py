@@ -112,18 +112,35 @@ def test_fresh_evaluation_requires_a_managed_service(serving_input: Path) -> Non
         for stage in ("accuracy", "benchmark"):
             managed = subprocess.run([
                 sys.executable, "/opt/managed_evaluation.py", "--",
-                sys.executable, "client.py", "--output-json", "/tmp/" + stage + ".json"
+                sys.executable, "client.py", "--output-json", "/logs/" + stage + ".json"
             ], capture_output=True)
             assert managed.returncode == 0, managed.stderr.decode()
             assert b"evaluator completed" in managed.stdout
             assert b"candidate service ready" in managed.stderr
             assert b"candidate service started" in managed.stderr
             import json
-            with open("/tmp/" + stage + ".json") as result:
+            with open("/logs/" + stage + ".json") as result:
                 assert json.load(result) == {"score": 42}
         """,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_log_directory_uses_standard_tempfile_resolution(serving_input: Path) -> None:
+    result = _container(
+        serving_input,
+        """\
+        import os, runpy, sys, tempfile
+        assert tempfile.gettempdir() == "/logs"
+        os.environ.pop("TMPDIR", None)
+        sys.argv = [
+            "/opt/managed_evaluation.py", "--", sys.executable, "client.py"
+        ]
+        runpy.run_path("/opt/managed_evaluation.py", run_name="__main__")
+        """,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "evaluator completed" in result.stdout
 
 
 @pytest.mark.parametrize("exit_code", [1, 7])

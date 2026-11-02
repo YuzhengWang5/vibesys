@@ -225,9 +225,7 @@ def run_evaluation(
         probe.bind(("127.0.0.1", port))
     url = f"http://127.0.0.1:{port}"
     with (
-        tempfile.TemporaryDirectory(
-            prefix=".vibesys-service-", dir=os.environ.get("TMPDIR", str(Path.cwd()))
-        ) as temporary,
+        tempfile.TemporaryDirectory(prefix="vibesys-service-") as temporary,
         (Path(temporary) / "service.log").open("w+", encoding="utf-8", errors="replace") as log,
         ExitStack() as cleanup,
     ):

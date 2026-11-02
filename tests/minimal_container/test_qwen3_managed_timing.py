@@ -92,7 +92,6 @@ def test_client_exit_is_preserved_and_total_includes_cleanup(
     assert record["managed_seconds"] >= (
         record["client_subprocess_seconds"] + record["startup_seconds"]
     )
-    assert not list(tmp_path.glob(".vibesys-service-*"))
     assert b"__VIBESYS_SERVICE_LOG_END__" in result.stderr
 
 
