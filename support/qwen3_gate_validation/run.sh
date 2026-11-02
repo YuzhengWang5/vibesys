@@ -13,7 +13,8 @@ for control in positive negative; do
   extra=0
   if [[ "$control" == negative ]]; then extra=1; fi
   set +e
-  docker run --rm --gpus "device=$CUDA_VISIBLE_DEVICES" \
+  /usr/bin/time -p -o "$run/logs/$control.time" docker run --rm --gpus "device=$CUDA_VISIBLE_DEVICES" \
+    --label "qwen3.operator-run=$(basename "$run")" \
     -v "$repo:/source:ro" -v "$run:/run" -v /mnt_ssd/data1/models/Qwen3-32B:/model:ro \
     -e CUDA_VISIBLE_DEVICES=0 -e CONTROL_CORRUPT="$extra" \
     -e PYTHONPATH=/source/sdk/vs-bench/src \

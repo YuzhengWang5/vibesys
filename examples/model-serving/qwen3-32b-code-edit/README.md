@@ -25,7 +25,7 @@ qwen3-32b-code-edit/
     │   └── README.md
     ├── accuracy_checker/
     │   ├── checker.py                 # teacher-forced top-five/logprob gate
-    │   ├── reference_logprobs.json    # pinned independent HF/vLLM calibration
+    │   ├── reference_logprobs.json    # pinned independent native HF reference
     │   └── README.md
     └── reference/
         ├── README.md                  # how to mount the target model
@@ -60,7 +60,7 @@ must return HTTP 200 from `/health` only after the real model is ready.
 Both manifest commands use `managed_evaluation.py`: it launches the submitted
 candidate, waits up to 900 seconds for readiness, runs the client,
 then stops the service and its descendants. Accuracy uses a pinned, independently
-calibrated HF reference without loading a second model. Accuracy and benchmark each use a
+computed HF reference without loading a second model. Accuracy and benchmark each use a
 fresh container; a service started in an agent's container is not available
 in a formal evaluation container. Stop self-test services before submitting
 formal evaluation to avoid loading two models onto the allocated GPU.
@@ -97,6 +97,9 @@ The checker compares teacher-forced production top-five and reference-top-one
 logprobs with native Hugging Face BF16 inference. Its numerical tolerances,
 KV-cache coverage and required observation interface are specified in
 `accuracy_checker/README.md`. The accuracy manifest owns service startup,
-cleanup. Independent HF/vLLM calibration is performed once, not per candidate.
+cleanup. Native HF reference generation is performed once, not per candidate.
+The fixed policy requires all 306 observations from six 50-continuation-token
+plans to meet mutual top2 and reference-top1 logprob error <=0.02, without
+any calibration margin. Independent vLLM diagnostics never change that limit.
 The benchmark separately records verbatim echo and improvement-over-input
 statistics; retain those statistics alongside throughput.

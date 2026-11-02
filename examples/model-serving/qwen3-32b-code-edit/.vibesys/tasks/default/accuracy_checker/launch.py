@@ -1,5 +1,6 @@
 """Fail fast on an unimplemented candidate before resolving GPU dependencies."""
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -10,6 +11,19 @@ def main() -> int:
     launcher = Path.cwd() / "run_server.sh"
     if not launcher.is_file():
         print(f"[accuracy] candidate startup entrypoint is missing: {launcher}", file=sys.stderr)
+        print(
+            "__VIBESYS_ACCURACY_PRECHECK__"
+            + json.dumps(
+                {
+                    "phase": "missing_launcher",
+                    "returncode": 1,
+                    "startup_seconds": None,
+                    "checker_seconds": None,
+                    "managed_seconds": None,
+                }
+            ),
+            file=sys.stderr,
+        )
         return 1
     checker = Path(__file__).with_name("checker.py")
     os.execvp("uv", ["uv", "run", "python", str(checker), "--managed", *sys.argv[1:]])

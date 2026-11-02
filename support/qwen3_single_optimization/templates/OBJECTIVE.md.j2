@@ -19,10 +19,12 @@ benchmark 请求可含 `prediction.content`；它是输入数据，而不是额�
 每个模型输出 token 必须具有生产模型计算依据，不得回放已完成请求的输出。
 
 精度以 `.vibesys/tasks/default/accuracy_checker/README.md` 的新可信门禁为准。
-实现其 `/v1/logprobs` teacher-forced top-five 协议和 `return_token_ids:true` 的 SSE token_ids。
+实现其 `/v1/logprobs` teacher-forced 观测协议和 `return_token_ids:true` 的 SSE token_ids。
 `/v1/logprobs` 必须复用 `/v1/completions` 同一真实生产 forward、权重、attention、
 精度与 KV 管理；优化启用后该观测接口也经过该生产路径，不得另建 HF 旁路。
-可信 checker 与预先独立校准并固定的 HF BF16 eager 参考 logprob 比对。
+可信 checker 与预先独立生成并固定的 HF BF16 eager 参考 logprob 比对：
+相同固定 token 前缀喂入 50 个续写 token，所有 306 个观测位置的 HF top1
+logprob 绝对差 <=0.02，双向 top1 均在对方 top2，100% 满足，不加 margin。
 不得修改 checker、reference、manifest、benchmark、SDK 或任何可信评测内容，
 不得调整阈值。数值通过不代替代码路径审查；最终明确给出路径共享及唯一因素审计证据。
 

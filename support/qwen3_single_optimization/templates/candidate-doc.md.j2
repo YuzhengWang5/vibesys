@@ -26,7 +26,7 @@ prediction 是工作负载输入，不规定算法或授权额外优化。
 
 模型权重只读挂载 `/model`，使用 Qwen/Qwen3-32B BF16，禁用 thinking。
 本目录的 config、reference.py、meta.json 是模型说明，不是优化实现路线。
-可信精度参考由操作者独立计算、校准并固定，checker 不重复加载 HF 模型。
+可信精度参考由操作者独立计算并固定，checker 不重复加载 HF 模型。
 具体协议和阈值以相邻 accuracy_checker/README.md 为准，不得改变可信评测。
 候选 `/v1/logprobs` 必须调用自己的真实生产 forward，不能调用另一个 HF 参考旁路。
 {% endif %}

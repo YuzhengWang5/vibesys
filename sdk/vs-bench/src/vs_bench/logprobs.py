@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from decimal import Decimal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, StrictInt, model_validator
@@ -47,20 +48,26 @@ class TokenLogprobs(BaseModel):
 
 
 class LogprobTolerance(BaseModel):
-    """Fixed gate policy; calibration may only use the independent vLLM control."""
+    """Fixed mutual top-k policy over five reported full-vocabulary observations.
+
+    The historical ``top5`` rate field names remain compatible; ``top_k`` selects
+    the subset actually compared. No numerical margin is added to the limit.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     min_mutual_top5_rate: float = Field(default=0.95, gt=0, le=1)
     max_reference_top1_delta: FiniteFloat = Field(default=0.2, ge=0)
+    top_k: int = Field(default=TOP_K, ge=1, le=TOP_K, strict=True)
 
 
 class LogprobComparison(BaseModel):
-    """Position counts and worst reference-top-one logprob error, never logit error."""
+    """Historical top5-named fields describe the selected ``top_k`` policy."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     passed: bool
+    top_k: int
     positions: int
     mutual_top5_rate: float
     max_reference_top1_delta: float
@@ -109,30 +116,35 @@ def compare_logprobs(
         raise ValueError(message)
     top5_failed = []
     deltas = []
+    logprob_failed = []
     for index, (expected, actual) in enumerate(zip(reference, candidate, strict=True)):
-        if not math.isclose(
-            expected.reference_token_logprob, expected.top_logprobs[0], abs_tol=1e-5
-        ):
+        if expected.reference_token_logprob != expected.top_logprobs[0]:
             message = "reference_token_logprob must be the reference top-one logprob"
             raise ValueError(message)
         reference_id = expected.top_token_ids[0]
         if reference_id in actual.top_token_ids:
             reported = actual.top_logprobs[actual.top_token_ids.index(reference_id)]
-            if not math.isclose(reported, actual.reference_token_logprob, abs_tol=1e-5):
+            if reported != actual.reference_token_logprob:
                 message = "candidate reference_token_logprob disagrees with its top-five"
                 raise ValueError(message)
         if (
-            reference_id not in actual.top_token_ids
-            or actual.top_token_ids[0] not in expected.top_token_ids
+            reference_id not in actual.top_token_ids[: tolerance.top_k]
+            or actual.top_token_ids[0] not in expected.top_token_ids[: tolerance.top_k]
         ):
             top5_failed.append(index)
-        deltas.append(abs(expected.reference_token_logprob - actual.reference_token_logprob))
+        # Compare the decimal values carried by JSON, not a widened binary-float
+        # limit. In particular -0.50 versus -0.52 is exactly the 0.02 boundary.
+        delta = abs(
+            Decimal(str(expected.reference_token_logprob))
+            - Decimal(str(actual.reference_token_logprob))
+        )
+        deltas.append(float(delta))
+        if delta > Decimal(str(tolerance.max_reference_top1_delta)):
+            logprob_failed.append(index)
     rate = 1 - len(top5_failed) / len(reference)
-    logprob_failed = [
-        index for index, delta in enumerate(deltas) if delta > tolerance.max_reference_top1_delta
-    ]
     return LogprobComparison(
         passed=rate >= tolerance.min_mutual_top5_rate and not logprob_failed,
+        top_k=tolerance.top_k,
         positions=len(reference),
         mutual_top5_rate=rate,
         max_reference_top1_delta=max(deltas),

@@ -7,6 +7,7 @@ code supplies run_server.sh; neither the checker nor the benchmark is modified.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import shutil
@@ -19,6 +20,7 @@ import time
 import urllib.error
 import urllib.request
 from contextlib import ExitStack, suppress
+from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -31,6 +33,48 @@ _LOG = logging.getLogger("managed-evaluation")
 _POLL_SECONDS = 0.1
 _STOP_SECONDS = 5
 _MAX_PORT = 65535
+TIMING_MARKER = "__VIBESYS_MANAGED_TIMING__"
+
+
+@dataclass
+class EvaluationTiming:
+    """Accumulate shell measurements without changing evaluator metrics."""
+
+    started: float
+    phase: str = "preflight"
+    failure_phase: str | None = None
+    returncode: int | None = None
+    client_returncode: int | None = None
+    launcher_to_health_seconds: float | None = None
+    client_seconds: float | None = None
+    checker_seconds: float | None = None
+
+    def begin_cleanup(self) -> None:
+        """Mark cleanup while retaining the phase that raised an exception."""
+        if sys.exc_info()[0] is not None and self.failure_phase is None:
+            self.failure_phase = self.phase
+        self.phase = "cleanup"
+
+    def emit(self, stream: TextIO, *, finished: float) -> None:
+        """Emit one fixed JSON record after cleanup, including unknown costs."""
+        phase = self.failure_phase or self.phase
+        if self.returncode == 0:
+            phase = "completed"
+        payload = {
+            "schema_version": 1,
+            "phase": phase,
+            "returncode": self.returncode,
+            "client_returncode": self.client_returncode,
+            "startup_seconds": self.launcher_to_health_seconds,
+            "checker_seconds": self.checker_seconds,
+            "client_subprocess_seconds": self.client_seconds,
+            "managed_seconds": finished - self.started,
+            "dependency_cold_start_seconds": None,
+            "outer_environment_seconds": None,
+            "model_load_seconds": None,
+        }
+        stream.write(f"{TIMING_MARKER} {json.dumps(payload, sort_keys=True)}\n")
+        stream.flush()
 
 
 class EvaluationError(RuntimeError):
@@ -121,15 +165,41 @@ def _evaluate(
     service: subprocess.Popen[bytes],
     cancellation: Cancellation,
     cleanup: ExitStack,
+    timing: EvaluationTiming,
+) -> int:
+    timing.phase = "client"
+    started = time.perf_counter()
+    try:
+        return _run_client(command, service, cancellation, cleanup, timing)
+    finally:
+        timing.client_seconds = time.perf_counter() - started
+        if (
+            len(command) > 1
+            and Path(command[0]).name in {"python", "python3", Path(sys.executable).name}
+            and Path(command[1]).suffix == ".py"
+        ):
+            timing.checker_seconds = timing.client_seconds
+
+
+def _run_client(
+    command: list[str],
+    service: subprocess.Popen[bytes],
+    cancellation: Cancellation,
+    cleanup: ExitStack,
+    timing: EvaluationTiming,
 ) -> int:
     evaluator = subprocess.Popen(command, stdin=subprocess.DEVNULL, start_new_session=True)
     cleanup.callback(_stop, evaluator)
+    cleanup.callback(timing.begin_cleanup)
     while True:
         cancellation.check()
         status = _status(evaluator)
         if status is not None:
             _LOG.info("evaluator exited: status=%s", status)
-            return status if status >= 0 else 128 - status
+            timing.client_returncode = status if status >= 0 else 128 - status
+            if timing.client_returncode != 0:
+                timing.failure_phase = "client"
+            return timing.client_returncode
         service_status = _status(service)
         if service_status is not None:
             message = f"candidate service exited during evaluation: status={service_status}"
@@ -143,6 +213,7 @@ def run_evaluation(
     port: int,
     startup_timeout: float,
     cancellation: Cancellation,
+    timing: EvaluationTiming,
 ) -> int:
     """Own the service, readiness, evaluator, logs, and cleanup for one stage."""
     launcher = Path.cwd() / "run_server.sh"
@@ -161,6 +232,8 @@ def run_evaluation(
         cleanup.callback(_write_service_log, log)
         service_command = ["bash", str(launcher), "--model-dir", "/model", "--port", str(port)]
         _LOG.info("starting candidate service: %s", service_command)
+        timing.phase = "startup"
+        started = time.perf_counter()
         service = subprocess.Popen(
             service_command,
             stdin=subprocess.DEVNULL,
@@ -169,12 +242,15 @@ def run_evaluation(
             start_new_session=True,
         )
         cleanup.callback(_stop, service)
+        cleanup.callback(timing.begin_cleanup)
         _wait_ready(service, f"{url}/health", startup_timeout, cancellation)
-        return _evaluate([*command, "--url", url], service, cancellation, cleanup)
+        timing.launcher_to_health_seconds = time.perf_counter() - started
+        return _evaluate([*command, "--url", url], service, cancellation, cleanup, timing)
 
 
 def main(argv: list[str] | None = None) -> int:
     """Forward evaluator arguments unchanged, except for its managed local URL."""
+    started = time.perf_counter()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--startup-timeout-seconds", type=float, default=900)
@@ -189,20 +265,28 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--startup-timeout-seconds must be finite and positive")
     logging.basicConfig(level=logging.INFO, format="[managed-evaluation] %(message)s")
     cancellation = Cancellation()
-    with ExitStack() as signals:
-        for number in (signal.SIGINT, signal.SIGTERM):
-            previous = signal.signal(number, cancellation.record)
-            signals.callback(signal.signal, number, previous)
-        try:
-            return run_evaluation(
-                command,
-                port=args.port,
-                startup_timeout=args.startup_timeout_seconds,
-                cancellation=cancellation,
-            )
-        except (EvaluationError, OSError, subprocess.TimeoutExpired) as error:
-            _LOG.error("%s", error)
-            return 128 + cancellation.signum if cancellation.signum is not None else 1
+    timing = EvaluationTiming(started=started)
+    try:
+        with ExitStack() as signals:
+            for number in (signal.SIGINT, signal.SIGTERM):
+                previous = signal.signal(number, cancellation.record)
+                signals.callback(signal.signal, number, previous)
+            try:
+                timing.returncode = run_evaluation(
+                    command,
+                    port=args.port,
+                    startup_timeout=args.startup_timeout_seconds,
+                    cancellation=cancellation,
+                    timing=timing,
+                )
+            except (EvaluationError, OSError, subprocess.TimeoutExpired) as error:
+                _LOG.error("%s", error)
+                timing.returncode = (
+                    128 + cancellation.signum if cancellation.signum is not None else 1
+                )
+        return timing.returncode
+    finally:
+        timing.emit(sys.stderr, finished=time.perf_counter())
 
 
 if __name__ == "__main__":

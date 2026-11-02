@@ -1,6 +1,6 @@
-"""Serial operator CLI: prepare, queue, inspect, approve and retry.
+"""Operator CLI: prepare, dispatch, queue, inspect, approve and retry.
 
-No command starts a GPU experiment except ``queue`` and its leased ``worker``.
+Only ``dispatch``, ``queue`` and their leased ``worker`` start experiments.
 State is durable before dispatch; an interrupted attempt is not replayed.
 """
 
@@ -47,8 +47,11 @@ from vs_prompts.api import TemplateRenderer
 from vs_runtime.api.infrastructure import SDKRoots, materialize_input_project
 from vs_sim.api import (
     DISCARD,
+    Clock,
+    ForegroundLauncher,
     InheritedStdioLauncher,
     OsProcesses,
+    Processes,
     ProcessOutcome,
     ProcessSpec,
     SystemClock,
@@ -71,14 +74,18 @@ LEASE_WAIT_SECONDS = 43200
 COPILOT_TRAILER = "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 
 
-def command(args: list[str], *, cwd: Path | None = None) -> str:
+def command(args: list[str], *, cwd: Path | None = None, processes: Processes | None = None) -> str:
     """Run a bounded CPU/control command, preserving errors."""
-    return command_bytes(args, cwd=cwd).decode().strip()
+    return command_bytes(args, cwd=cwd, processes=processes).decode().strip()
 
 
-def command_bytes(args: list[str], *, cwd: Path | None = None) -> bytes:
+def command_bytes(
+    args: list[str], *, cwd: Path | None = None, processes: Processes | None = None
+) -> bytes:
     """Call the process-owning public interface without a shell."""
-    outcome = OsProcesses().run(ProcessSpec(argv=tuple(args), cwd=cwd), timeout=120, output=DISCARD)
+    outcome = (processes or OsProcesses()).run(
+        ProcessSpec(argv=tuple(args), cwd=cwd), timeout=120, output=DISCARD
+    )
     if not isinstance(outcome, ProcessOutcome):
         fail(f"控制命令未正常结束: {args}: {outcome}")
     if outcome.returncode != 0:
@@ -86,9 +93,9 @@ def command_bytes(args: list[str], *, cwd: Path | None = None) -> bytes:
     return outcome.stdout
 
 
-def timestamp() -> str:
+def timestamp(clock: Clock | None = None) -> str:
     """Read the real clock only in this operator shell."""
-    return utc_datetime(SystemClock()).strftime("%Y%m%d_%H%M%S")
+    return utc_datetime(clock or SystemClock()).strftime("%Y%m%d_%H%M%S")
 
 
 def digest(path: Path) -> str:
@@ -99,8 +106,16 @@ def digest(path: Path) -> str:
 def save(path: Path, model: BaseModel) -> None:
     """Atomically publish JSON beside its destination, never in a temporary directory."""
     pending = path.with_name(path.name + ".pending")
-    pending.write_text(model.model_dump_json(indent=2) + "\n")
+    with pending.open("w") as stream:
+        stream.write(model.model_dump_json(indent=2) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
     pending.replace(path)
+    directory = os.open(path.parent, os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
 def read_spec(run: Path) -> RunSpec:
@@ -149,28 +164,55 @@ def queue_lock(experiment: Path, optimization: Optimization | None) -> Iterator[
                 yield
 
 
-def checkpoint(source: Path, expected: str | None = None) -> tuple[str, str]:
+def checkpoint(
+    source: Path, expected: str | None = None, *, processes: Processes | None = None
+) -> tuple[str, str]:
     """Require the current clean source checkpoint, not a hard-coded historic pin."""
-    dirty = command(["git", "status", "--porcelain", "--untracked-files=normal"], cwd=source)
+    dirty = command(
+        ["git", "status", "--porcelain", "--untracked-files=normal"],
+        cwd=source,
+        processes=processes,
+    )
     if dirty:
         fail(f"源码未 checkpoint; 拒绝准备/运行:\n{dirty}")
-    head = command(["git", "rev-parse", "HEAD"], cwd=source)
+    head = command(["git", "rev-parse", "HEAD"], cwd=source, processes=processes)
     if expected is not None and head != expected:
         fail(f"HEAD 已变化: expected={expected}; actual={head}")
-    return head, command(["git", "branch", "--show-current"], cwd=source)
+    return head, command(["git", "branch", "--show-current"], cwd=source, processes=processes)
 
 
 def all_specs(experiment: Path) -> list[RunSpec]:
     """Enumerate immutable run specs; partial preparations remain visibly broken."""
-    return [read_spec(run) for run in sorted((experiment / "runs").iterdir()) if run.is_dir()]
+    specs = []
+    for run in sorted((experiment / "runs").iterdir()):
+        if not run.is_dir():
+            continue
+        if (run / ".preparing").exists():
+            fail(f"run 准备不完整: {run}")
+        if (run / "scripts/spec.json").is_file():
+            spec = read_spec(run)
+            if spec.experiment != experiment.resolve():
+                fail(f"spec.experiment 不匹配: {run}")
+            if not (run / "logs/status.json").is_file():
+                fail(f"run 准备不完整, 缺少 logs/status.json: {run}")
+            read_state(run)
+            specs.append(spec)
+        elif (run / "project").exists() or "_pilot-" in run.name or "_batch-" in run.name:
+            fail(f"run 准备不完整, 缺少 scripts/spec.json: {run}")
+    return specs
 
 
 def latest_specs(experiment: Path, phase: str) -> list[RunSpec]:
     """Choose newest attempt per planned slot, without deleting failed history."""
     latest = {}
+    seen = set()
     for spec in all_specs(experiment):
         if spec.slot.phase == phase:
             key = (spec.slot.optimization, spec.slot.repeat)
+            identity = (spec.slot, spec.attempt)
+            if identity in seen:
+                fail(f"同一 slot 的 attempt 重复: {spec.run}")
+            seen.add(identity)
             if key not in latest or spec.attempt > latest[key].attempt:
                 latest[key] = spec
     return list(latest.values())
@@ -229,8 +271,12 @@ def export_candidate(source: Path, project: Path, head: str, slot: Slot) -> str:
     reference = json.loads(
         (project / TASK / "accuracy_checker/reference_logprobs.json").read_text()
     )
-    if reference["calibration"]["status"] != "measured":
-        fail("HF/vLLM 参考尚未完成校准; 拒绝准备。")
+    if reference["calibration"]["status"] != "fixed" or reference["tolerance"] != {
+        "top_k": 2,
+        "min_mutual_top5_rate": 1.0,
+        "max_reference_top1_delta": 0.02,
+    }:
+        fail("HF 参考尚未固定为 top2/100%/0.02; 拒绝准备。")
     command(["git", "init", "-q", "-b", "main"], cwd=project)
     command(["git", "config", "user.name", "wangyuzheng"], cwd=project)
     command(["git", "config", "user.email", "yuuzhwang@gmail.com"], cwd=project)
@@ -262,6 +308,7 @@ def prepare_run(
     tag = f"{slot.phase}-{slot.optimization}-r{slot.repeat}-a{attempt}"
     run = experiment / "runs" / f"{timestamp()}_{tag}-{uuid.uuid4().hex[:8]}"
     run.mkdir(parents=True, exist_ok=False)
+    (run / ".preparing").touch()
     for name in ("scripts", "logs", "plots", "project"):
         (run / name).mkdir()
     copy_directory(HERE, run / "scripts/qwen3_single_optimization")
@@ -299,12 +346,13 @@ def prepare_run(
     records(spec, RunState(updated_at=timestamp()))
     with (experiment / "CODE_PIN.md").open("a") as stream:
         stream.write(f"\n- `{run.name}` → `{head}`; source=`{source}`; branch=`{branch}`\n")
+    (run / ".preparing").unlink()
     return spec
 
 
-def validate_inputs(spec: RunSpec) -> None:
+def validate_inputs(spec: RunSpec, *, processes: Processes | None = None) -> None:
     """Reject changed source/scripts/input contracts before launching."""
-    _, branch = checkpoint(spec.source, spec.tested_commit)
+    _, branch = checkpoint(spec.source, spec.tested_commit, processes=processes)
     if branch != spec.branch:
         fail(f"branch 已变化: expected={spec.branch}; actual={branch}")
     for name, expected in spec.script_sha256.items():
@@ -337,7 +385,10 @@ def verify_revision_inputs(spec: RunSpec, revision: str) -> None:
 
 def load_approval(experiment: Path, source: Path) -> Approval:
     """Revalidate the pilot against live canonical evidence, not an exit code."""
-    approval = Approval.model_validate_json((experiment / "pilot-approval.json").read_bytes())
+    target = experiment / "pilot-approval.json"
+    if not target.is_file():
+        fail(f"尚无 pilot approval: {target}; 不开放 batch。")
+    approval = Approval.model_validate_json(target.read_bytes())
     spec = read_spec(approval.pilot)
     state = read_state(spec.run)
     checkpoint(source, approval.tested_commit)
@@ -360,28 +411,40 @@ def load_approval(experiment: Path, source: Path) -> Approval:
     return approval
 
 
+def prepare_experiment(source: Path, phase: str, experiment: Path | None) -> Path:
+    """Select a new pilot direction or validate an explicitly reused direction."""
+    if experiment is not None:
+        experiment = experiment.resolve()
+        for name in ("README.md", "CODE_PIN.md"):
+            if not (experiment / name).is_file():
+                fail(f"已有 experiment 缺少 {name}: {experiment}")
+        if not (experiment / "runs").is_dir():
+            fail(f"已有 experiment 缺少 runs/: {experiment}")
+        return experiment
+    if phase != "pilot":
+        fail("prepare batch 需要 --experiment。")
+    experiment = source.parents[2] / "exps" / f"{timestamp()}_{source.name}"
+    experiment.mkdir(parents=True, exist_ok=False)
+    (experiment / "runs").mkdir()
+    (experiment / "CODE_PIN.md").write_text("# 每 run 的实际源码 checkpoint\n")
+    (experiment / "README.md").write_text(
+        TemplateRenderer(HERE / "templates").render_template(
+            "record.md.j2", document="direction", source=source
+        )
+    )
+    return experiment
+
+
 def prepare(args: argparse.Namespace) -> None:
     """Prepare a pilot or gated batch without acquiring a GPU."""
     source = Path(os.environ["QWEN3_SOURCE"]).resolve()
     checkpoint(source)
-    if args.phase == "pilot":
-        experiment = source.parents[2] / "exps" / f"{timestamp()}_{source.name}"
-        experiment.mkdir(parents=True, exist_ok=False)
-        (experiment / "runs").mkdir()
-        (experiment / "CODE_PIN.md").write_text("# 每 run 的实际源码 checkpoint\n")
-        (experiment / "README.md").write_text(
-            TemplateRenderer(HERE / "templates").render_template(
-                "record.md.j2", document="direction", source=source
-            )
-        )
-    else:
-        if args.experiment is None:
-            fail("prepare batch 需要 --experiment。")
-        experiment = args.experiment.resolve()
-        load_approval(experiment, source)
-        if latest_specs(experiment, "batch"):
-            fail("batch 已准备; 使用 status/queue/retry, 不覆盖原计划。")
+    experiment = prepare_experiment(source, args.phase, args.experiment)
     with locked(experiment / ".queue.lock"):
+        if args.phase == "batch":
+            load_approval(experiment, source)
+        if latest_specs(experiment, args.phase):
+            fail(f"{args.phase} 已准备; 使用 status/queue/retry, 不覆盖原计划。")
         for slot in slots(args.phase):
             spec = prepare_run(source, experiment, slot)
             sys.stdout.write(str(spec.run) + "\n")
@@ -413,6 +476,11 @@ def framework_args(spec: RunSpec) -> list[str]:
         spec.provider,
         "--model",
         spec.agent_model,
+        *[
+            argument
+            for role in ("orchestrator", "profiler", "implementer", "judge")
+            for argument in ("--role-model", f"{role}={spec.agent_model}")
+        ],
         "--allow-unvetted-model",
         "--backend",
         "cuda",
@@ -438,9 +506,16 @@ def run_process(args: list[str], log: Path, *, cwd: Path, timeout: int) -> int:
     return asyncio.run(run_foreground(args, log, cwd=cwd, wait_seconds=timeout))
 
 
-async def run_foreground(args: list[str], log: Path, *, cwd: Path, wait_seconds: int) -> int:
+async def run_foreground(
+    args: list[str],
+    log: Path,
+    *,
+    cwd: Path,
+    wait_seconds: int,
+    launcher: ForegroundLauncher | None = None,
+) -> int:
     """Keep process ownership in vs-sim; bound graceful shutdown before force kill."""
-    child = await InheritedStdioLauncher().start(
+    child = await (launcher or InheritedStdioLauncher()).start(
         ["bash", str(HERE / "logged-command.sh"), str(log), *args], cwd=cwd
     )
     try:
@@ -455,7 +530,7 @@ async def run_foreground(args: list[str], log: Path, *, cwd: Path, wait_seconds:
         raise
 
 
-def cleanup(spec: RunSpec) -> bool:
+def cleanup(spec: RunSpec, *, processes: Processes | None = None) -> bool:
     """Remove only containers labeled with this run's unique framework ID."""
     owned = command(
         [
@@ -464,10 +539,11 @@ def cleanup(spec: RunSpec) -> bool:
             "-aq",
             "--filter",
             f"label=vibesys.run-id={spec.run_id}",
-        ]
+        ],
+        processes=processes,
     ).split()
     if owned:
-        command(["docker", "rm", "-f", *owned])
+        command(["docker", "rm", "-f", *owned], processes=processes)
     remaining = command(
         [
             "docker",
@@ -475,7 +551,8 @@ def cleanup(spec: RunSpec) -> bool:
             "-aq",
             "--filter",
             f"label=vibesys.run-id={spec.run_id}",
-        ]
+        ],
+        processes=processes,
     )
     return not remaining
 
@@ -498,7 +575,9 @@ def archive_framework(spec: RunSpec) -> None:
         destination.write_bytes(item.contents)
 
 
-def execute(spec: RunSpec) -> None:
+def execute(
+    spec: RunSpec, *, processes: Processes | None = None, clock: Clock | None = None
+) -> None:
     """Run within the gpuctl lease, preserving failure and cleanup evidence."""
     state = read_state(spec.run)
     if state.status is not Status.LAUNCHING:
@@ -508,11 +587,19 @@ def execute(spec: RunSpec) -> None:
     inspection = None
     cleanup_ok = False
     try:
-        validate_inputs(spec)
+        state = state.model_copy(
+            update={
+                "status": Status.RUNNING,
+                "updated_at": timestamp(clock),
+                "detail": "worker 已领取 intent; 核验单卡租约与输入, 不得重放。",
+            }
+        )
+        records(spec, state)
+        validate_inputs(spec, processes=processes)
         visible = os.environ["CUDA_VISIBLE_DEVICES"]
         if not visible or len(visible.split(",")) != 1:
             fail(f"每 run 必须恰好一张 GPU: {visible}")
-        gpu_state = command(["nvidia-smi"])
+        gpu_state = command(["nvidia-smi"], processes=processes)
         (spec.run / "logs/nvidia-smi-before.txt").write_text(gpu_state + "\n")
         os.environ["CUDA_VISIBLE_DEVICES"] = visible
         (spec.run / "scripts/device.env").write_text(
@@ -525,14 +612,15 @@ def execute(spec: RunSpec) -> None:
                 visible,
                 "--query-compute-apps=pid",
                 "--format=csv,noheader,nounits",
-            ]
+            ],
+            processes=processes,
         )
         if busy:
             fail(f"gpuctl 分配卡仍有计算进程, 拒绝启动: {busy}")
         state = state.model_copy(
             update={
                 "status": Status.RUNNING,
-                "updated_at": timestamp(),
+                "updated_at": timestamp(clock),
                 "cuda_visible_devices": visible,
                 "detail": "运行中, 尚无成功结论。",
             }
@@ -561,7 +649,7 @@ def execute(spec: RunSpec) -> None:
         LOGGER.exception("本 attempt 失败; 不会原地重试")
     finally:
         try:
-            cleanup_ok = cleanup(spec)
+            cleanup_ok = cleanup(spec, processes=processes)
             archive_framework(spec)
         except Exception as error:
             cleanup_ok = False
@@ -573,7 +661,7 @@ def execute(spec: RunSpec) -> None:
         state = state.model_copy(
             update={
                 "status": Status.FINISHED if finished else Status.FAILED,
-                "updated_at": timestamp(),
+                "updated_at": timestamp(clock),
                 "returncode": result,
                 "detail": detail,
                 "cleanup_ok": cleanup_ok,
@@ -584,11 +672,13 @@ def execute(spec: RunSpec) -> None:
         fail(f"run 失败: {spec.run}; 请查询日志并 retry 新 run。")
 
 
-def worker(args: argparse.Namespace) -> None:
+def worker(
+    args: argparse.Namespace, *, processes: Processes | None = None, clock: Clock | None = None
+) -> None:
     """Consume one durable intent; independent candidates may use independent leases."""
     spec = read_spec(args.run.resolve())
     with locked(spec.run / ".execution.lock"):
-        execute(spec)
+        execute(spec, processes=processes, clock=clock)
 
 
 def planned_queue(experiment: Path, phase: str, optimization: Optimization | None) -> list[RunSpec]:
@@ -596,13 +686,80 @@ def planned_queue(experiment: Path, phase: str, optimization: Optimization | Non
     if optimization is not None and phase != "batch":
         fail("--optimization 只适用于已通过 pilot 审查的正式 batch。")
     planned = latest_specs(experiment, phase)
-    if len(planned) != len(slots(phase)):
+    expected = slots(phase)
+    if {spec.slot for spec in planned} != set(expected):
         fail("准备的 slot 不完整; 不启动部分 batch。")
+    if len({spec.source for spec in planned}) != 1:
+        fail("计划内 source 不一致。")
+    if len({spec.run_id for spec in planned}) != len(planned):
+        fail("计划内 run_id 重复, trial 不独立。")
     if phase == "batch":
         load_approval(experiment, planned[0].source)
+    by_slot = {spec.slot: spec for spec in planned}
     return [
-        spec for spec in planned if optimization is None or spec.slot.optimization == optimization
+        by_slot[slot]
+        for slot in expected
+        if optimization is None or slot.optimization == optimization
     ]
+
+
+async def launch_run(
+    spec: RunSpec,
+    *,
+    launcher: ForegroundLauncher | None = None,
+    processes: Processes | None = None,
+    clock: Clock | None = None,
+) -> None:
+    """Consume an admitted slot once, under a host lock distinct from its worker lock.
+
+    The caller holds the experiment's plan lock and validates pilot admission.
+    Any uncertain launcher outcome retains intent; it never authorizes replay.
+    """
+    with locked(spec.run / ".dispatch.lock"):
+        state = read_state(spec.run)
+        can_launch(state)
+        validate_inputs(spec, processes=processes)
+        records(
+            spec,
+            state.model_copy(
+                update={
+                    "status": Status.LAUNCHING,
+                    "updated_at": timestamp(clock),
+                    "detail": "已记录启动 intent, 等待 gpuctl 单卡租约。",
+                }
+            ),
+        )
+        result = await run_foreground(
+            ["bash", str(spec.run / "scripts/launch.sh")],
+            spec.run / "logs/queue.log",
+            cwd=spec.run,
+            wait_seconds=LEASE_WAIT_SECONDS + spec.max_run_seconds + 4 * GRACE_SECONDS,
+            launcher=launcher,
+        )
+        final = read_state(spec.run)
+        if result != 0 or final.status is not Status.FINISHED:
+            fail(f"run 未正常完成或启动不明: {spec.run}; 保留 intent, 不重放、不继续队列。")
+
+
+async def dispatch_run(
+    run: Path,
+    *,
+    launcher: ForegroundLauncher | None = None,
+    processes: Processes | None = None,
+    clock: Clock | None = None,
+) -> None:
+    """Validate admission and dispatch one latest slot, without direction serialization."""
+    spec = read_spec(run)
+    with locked(spec.experiment / ".queue.lock", shared=True):
+        planned = planned_queue(spec.experiment, spec.slot.phase, None)
+        if spec not in planned:
+            fail("此 run 不是 slot 的最新 attempt。")
+        await launch_run(spec, launcher=launcher, processes=processes, clock=clock)
+
+
+def dispatch(args: argparse.Namespace) -> None:
+    """Run the public single-slot host dispatcher."""
+    asyncio.run(dispatch_run(args.run))
 
 
 def queue(args: argparse.Namespace) -> None:
@@ -623,52 +780,7 @@ def queue(args: argparse.Namespace) -> None:
             if spec.run in acknowledged:
                 LOGGER.error("保留已审查的失败实验, 不重跑、不计作成功: %s", spec.run)
                 continue
-            can_launch(state)
-            validate_inputs(spec)
-            state = state.model_copy(
-                update={
-                    "status": Status.LAUNCHING,
-                    "updated_at": timestamp(),
-                    "detail": "已记录启动 intent, 等待 gpuctl 单卡租约。",
-                }
-            )
-            records(spec, state)
-            try:
-                result = run_process(
-                    ["bash", str(spec.run / "scripts/launch.sh")],
-                    spec.run / "logs/queue.log",
-                    cwd=spec.run,
-                    timeout=LEASE_WAIT_SECONDS + spec.max_run_seconds + 4 * GRACE_SECONDS,
-                )
-            except BaseException as error:
-                final = read_state(spec.run)
-                if final.status is Status.LAUNCHING:
-                    records(
-                        spec,
-                        final.model_copy(
-                            update={
-                                "status": Status.FAILED,
-                                "updated_at": timestamp(),
-                                "detail": f"启动/租约异常: {type(error).__name__}: {error}",
-                            }
-                        ),
-                    )
-                raise
-            final = read_state(spec.run)
-            if result != 0 or final.status is not Status.FINISHED:
-                if final.status is Status.LAUNCHING:
-                    records(
-                        spec,
-                        final.model_copy(
-                            update={
-                                "status": Status.FAILED,
-                                "updated_at": timestamp(),
-                                "returncode": result,
-                                "detail": "gpuctl 未完成 worker 启动。",
-                            }
-                        ),
-                    )
-                fail(f"run 未正常完成: {spec.run}; 不继续队列。")
+            asyncio.run(launch_run(spec))
 
 
 def approve(args: argparse.Namespace) -> None:
@@ -783,6 +895,7 @@ def parser() -> argparse.ArgumentParser:
         sub.set_defaults(function=function)
     for name, function in (
         ("worker", worker),
+        ("dispatch", dispatch),
         ("inspect", query),
         ("logs", query),
         ("approve-pilot", approve),

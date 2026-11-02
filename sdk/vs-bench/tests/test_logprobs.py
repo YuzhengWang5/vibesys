@@ -72,3 +72,80 @@ def test_missing_positions_and_inconsistent_queried_logprobs_are_errors() -> Non
             top_logprobs=[-3] * 5,
             reference_token_logprob=-3,
         )
+
+
+STRICT = LogprobTolerance(top_k=2, min_mutual_top5_rate=1, max_reference_top1_delta=0.02)
+
+
+@pytest.mark.parametrize(
+    ("observed", "passed"),
+    [(-0.52, True), (-0.519999999, True), (-0.520000001, False), (-0.52001, False)],
+)
+def test_strict_decimal_boundary_has_no_margin(observed: float, *, passed: bool) -> None:
+    reference = TokenLogprobs(
+        top_token_ids=[0, 1, 2, 3, 4],
+        top_logprobs=[-0.5, -2, -3, -4, -5],
+        reference_token_logprob=-0.5,
+    )
+    candidate = reference.model_copy(
+        update={
+            "top_logprobs": [observed, -2, -3, -4, -5],
+            "reference_token_logprob": observed,
+        }
+    )
+    assert compare_logprobs([reference], [candidate], STRICT).passed is passed
+
+
+@pytest.mark.parametrize(
+    ("expected_ids", "actual_ids"),
+    [([0, 1, 2, 3, 4], [1, 2, 0, 3, 4]), ([0, 1, 2, 3, 4], [2, 0, 1, 3, 4])],
+)
+def test_strict_mutual_top2_rejects_either_direction(
+    expected_ids: list[int], actual_ids: list[int]
+) -> None:
+    expected = TokenLogprobs(
+        top_token_ids=expected_ids,
+        top_logprobs=[-2] * 5,
+        reference_token_logprob=-2,
+    )
+    actual = expected.model_copy(update={"top_token_ids": actual_ids})
+    result = compare_logprobs([expected] * 306, [expected] * 305 + [actual], STRICT)
+    assert not result.passed
+    assert result.top_k == 2
+    assert result.top5_failed_positions == [305]
+
+
+@given(st.integers(min_value=6, max_value=500))
+def test_summary_normalizes_entire_vocabulary(vocabulary: int) -> None:
+    row = summarize_logits(np.zeros((1, vocabulary)), [vocabulary - 1])[0]
+    assert row.reference_token_logprob == pytest.approx(-np.log(vocabulary))
+    assert sum(np.exp(row.top_logprobs)) == pytest.approx(5 / vocabulary)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [[-2, -3, -2, -4, -5], [-2, -3, -4, -5], [-2, -3, -4, -5, np.inf]],
+)
+def test_top_observations_reject_unsorted_missing_and_nonfinite(values: list[float]) -> None:
+    with pytest.raises(ValidationError):
+        TokenLogprobs(
+            top_token_ids=[0, 1, 2, 3, 4],
+            top_logprobs=values,
+            reference_token_logprob=-2,
+        )
+
+
+def test_queried_probability_cannot_hide_a_threshold_exceedance() -> None:
+    reference = TokenLogprobs(
+        top_token_ids=[0, 1, 2, 3, 4],
+        top_logprobs=[-0.5, -2, -3, -4, -5],
+        reference_token_logprob=-0.5,
+    )
+    forged = reference.model_copy(
+        update={
+            "top_logprobs": [-0.520001, -2, -3, -4, -5],
+            "reference_token_logprob": -0.52,
+        }
+    )
+    with pytest.raises(ValueError, match="disagrees"):
+        compare_logprobs([reference], [forged], STRICT)

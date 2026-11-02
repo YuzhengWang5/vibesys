@@ -115,6 +115,21 @@ def test_fresh_evaluation_requires_a_managed_service(serving_input: Path) -> Non
             assert b"candidate service ready" in managed.stderr
             assert b"candidate service started" in managed.stderr
             import json
+            timing = [
+                json.loads(line.split(b" ", 1)[1])
+                for line in managed.stderr.splitlines()
+                if line.startswith(b"__VIBESYS_MANAGED_TIMING__ ")
+            ]
+            assert len(timing) == 1
+            record = timing[0]
+            assert record["schema_version"] == 1
+            assert record["returncode"] == record["client_returncode"] == 0
+            assert record["startup_seconds"] is not None
+            assert record["checker_seconds"] == record["client_subprocess_seconds"]
+            assert record["checker_seconds"] is not None
+            assert record["dependency_cold_start_seconds"] is None
+            assert record["managed_seconds"] >= record["startup_seconds"]
+            assert record["managed_seconds"] >= record["checker_seconds"]
             with open("/tmp/" + stage + ".json") as result:
                 assert json.load(result) == {"score": 42}
         """,
@@ -133,6 +148,14 @@ def test_evaluator_failure_is_preserved_and_service_stops(
             sys.executable, "client.py", "--exit-code", EXIT_CODE
         ], capture_output=True)
         assert managed.returncode == int(EXIT_CODE), managed.stderr.decode()
+        import json
+        timing = [
+            json.loads(line.split(b" ", 1)[1])
+            for line in managed.stderr.splitlines()
+            if line.startswith(b"__VIBESYS_MANAGED_TIMING__ ")
+        ]
+        assert len(timing) == 1
+        assert timing[0]["returncode"] == timing[0]["client_returncode"] == int(EXIT_CODE)
         with socket.socket() as probe:
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             probe.bind(("127.0.0.1", 8000))
@@ -206,10 +229,20 @@ def test_cancellation_stops_the_service_and_evaluator(serving_input: Path) -> No
         _ROOT / "support/scenario-c-repro/managed-input.toml",
     ],
 )
-def test_managed_input_wraps_both_original_evaluators(path: Path) -> None:
+def test_managed_input_wraps_evaluators_or_uses_the_fail_fast_accuracy_launcher(path: Path) -> None:
     config = tomllib.loads(path.read_text())
     for stage, evaluator in (("accuracy", "checker.py"), ("benchmark", "benchmark.py")):
         command = config[stage]["command"]
+        if stage == "accuracy" and path == _TASK / "vibesys.input.toml":
+            assert command == [
+                "python",
+                "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/launch.py",
+                "--tokenizer-path",
+                "/model",
+                "--seed",
+                "42",
+            ]
+            continue
         assert command[:3] == [
             "python",
             "${PROJECT_ROOT}/.vibesys/tasks/default/managed_evaluation.py",
@@ -219,7 +252,7 @@ def test_managed_input_wraps_both_original_evaluators(path: Path) -> None:
     assert config["benchmark"]["result"]["metric"] == "median_tok_per_sec"
 
 
-def test_reproduction_only_freezes_the_examples_client_environment() -> None:
+def test_reproduction_freezes_the_same_benchmark_environment_not_the_strict_gate() -> None:
     example = tomllib.loads((_TASK / "vibesys.input.toml").read_text())
     reproduction = tomllib.loads(
         (_ROOT / "support/scenario-c-repro/managed-input.toml").read_text()
@@ -228,4 +261,8 @@ def test_reproduction_only_freezes_the_examples_client_environment() -> None:
         command = reproduction[stage]["command"]
         assert command.count("--frozen") == 1
         reproduction[stage]["command"] = [item for item in command if item != "--frozen"]
-    assert reproduction == example
+    assert reproduction["benchmark"] == example["benchmark"]
+    assert reproduction["accuracy"] != example["accuracy"]
+    assert {key: value for key, value in reproduction.items() if key != "accuracy"} == {
+        key: value for key, value in example.items() if key != "accuracy"
+    }

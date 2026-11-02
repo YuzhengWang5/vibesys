@@ -3,7 +3,8 @@
 
 源码工作树：`{{ source }}`。计划：1 次 pilot（cuda-graph）；
 pilot 经可信精度、benchmark、单因素正收益与框架终态审查通过后，
-开放四种宏观方向各五次独立重复。方向间并行、方向内串行，每 run 全程租一张卡。
+开放四种宏观方向各三次独立 trial，总计12正式slot。每个run独立调度，
+不要求方向内串行；两组公平交错且合计最多八卡，每run全程租一张卡。
 每次执行真实 tested_commit 见 CODE_PIN.md；状态见各 run/logs/status.json。
 所有运行使用 outer-loop=agent、Copilot CLI gpt-6.1-sol、max-rounds=5、
 max-in-flight=1。不自动降精度、不改可信评测、不复用失败 attempt。

@@ -7,7 +7,8 @@ python .vibesys/tasks/default/accuracy_checker/launch.py --tokenizer-path /model
 ```
 
 门禁确认引擎大致数值正确，不判断代码编辑答案是否正确。参考是操作者独立计算、
-经 vLLM 校准并 checkpoint 的 `reference_logprobs.json`，不是候选生成的答案。
+使用 native HF BF16 eager cached forward 重新计算并 checkpoint 的
+`reference_logprobs.json`，不是候选生成的答案。vLLM 仅作独立诊断，不校准阈值。
 模型 config 和权重索引 hash 必须匹配。每次评测只加载候选模型一次，不再加载 HF；
 请求只传少量 top-five 和指定 token 的 logprob，不传完整词表。
 
@@ -42,21 +43,28 @@ teacher-forcing 使用固定 token，不使用两个引擎各自生成的不同�
 clean_up_tokenization_spaces=False` decode 后必须与拼接文本一致，最后发送 `[DONE]`。
 普通 benchmark 不请求此字段，性能计数不变。
 
-## 强度和校准
+## 固定强度和位置定义
 
-三个短代码上下文，prefill 长度 32/128/256，各续写 8 token。每个上下文分别运行
-单 token 和 `[1,4,1,2]` chunk 计划，共六次请求、54 个 teacher-forced 位置。
+三个短代码上下文，prefill 长度 32/128/256，各喂入固定 50 个续写 token。
+每个上下文分别运行 `[1]*50` 和 `[1,4,1,2]*6+[1,1]` chunk 计划，两计划的
+input_ids 完全一致；不是重复旧 8-token 场景，也不比较自由生成的两条轨迹。
+每计划包括 prefill 末尾 next-token 观测和全部续写位置，共 51 行；
+六次请求总计 306 个位置。位置 p 的含义始终为 `input_ids[:p+1]` 上的
+next-token 分布，50 指实际喂入的 continuation 数量，不是行数。
 另有两次最多 8 token 的 SSE 协议确认，覆盖空和非空 prediction。不比对完整 logits、
 cosine、RMSE、尾部词表或整段生成逐字一致；允许近似并列最大值交换及优化舍入差异。
 
-1. 至少 95% 的全部位置，同时满足 HF top-1 在候选 top-5 内，候选 top-1 在
-   HF top-5 内。54 个位置可容许两个不满足的位置；缺失位置不能缩小分母。
+1. 100% 的全部位置同时满足 HF top-1 在候选 top-2 内，候选 top-1 在 HF top-2 内。
+   任一位置失败即拒绝；返回仍为 top-five 摘要，但比较只使用前两个。
 2. 所有位置的 HF top-1 token，在候选与 HF 中的 logprob 绝对差不超过固定阈值。
-   vLLM/HF 最大差 <=0.2 时阈值为 0.2，否则阈值为 vLLM 最大差 +0.2。
-   原始校准值、版本与最终阈值保存在参考 JSON，不根据实验候选失败调整。
+   阈值精确为 0.02，无 margin，不改为 0.02001。以 JSON 十进制数值作差，
+   差值等于 0.02 通过，大于 0.02 拒绝。不按 vLLM 或候选失败放宽。
+3. checker 验证六个固定 case 的名称、长度、完整 chunk 计划、位置及共同前缀，
+   且拒绝任何其它 tolerance，参考 JSON 不能缩小分母或替换可信策略。
 
 双向 top-k 思路参考 vLLM `tests/models/utils.py:check_logprobs_close`。
-95% 汇总与数值阈值是本实验的轻量策略，不声称是 vLLM 原函数的默认策略。
-HF 原生 BF16 eager 使用相同 cached-forward 计划；vLLM 校准在每个相同前缀后
+100% 汇总与 0.02 数值阈值是本实验的固定策略，不声称是 vLLM 原函数的默认策略。
+HF 原生 BF16 eager 使用相同 cached-forward 计划；vLLM 诊断在每个相同前缀后
 teacher-force HF top-1，使用 prompt logprobs 取得该 token 和完整分布 top-five。
+vLLM 若失败会留下失败报告和非零退出码，不阻止已经验证 HF 正负控制的 pilot。
 准备与正负控制见源码 `support/qwen3_gate_validation/`；这些操作者脚本不提供给候选。

@@ -25,8 +25,10 @@ SOURCES = (
         "def search(xs, x):\n    for i,v in enumerate(xs):\n        if v==x: return i\n",
     ),
 )
-CONTINUATION_LENGTH = 8
-DEFAULT_TOLERANCE = LogprobTolerance()
+CONTINUATION_LENGTH = 50
+DEFAULT_TOLERANCE = LogprobTolerance(
+    top_k=2, min_mutual_top5_rate=1, max_reference_top1_delta=0.02
+)
 
 
 def prepare_hf(model_dir: Path, output: Path) -> None:
@@ -47,8 +49,8 @@ def prepare_hf(model_dir: Path, output: Path) -> None:
     cases = []
     with torch.inference_mode():
         for name, length, text in SOURCES:
-            ids = tokenizer.encode(text * (length + 8), add_special_tokens=False)[: length + 8]
-            for chunks in ([1] * 8, [1, 4, 1, 2]):
+            ids = tokenizer.encode(text * (length + 50), add_special_tokens=False)[: length + 50]
+            for chunks in ([1] * 50, [1, 4, 1, 2] * 6 + [1, 1]):
                 result = model(torch.tensor([ids[:length]], device="cuda"), use_cache=True)
                 cache, cursor = result.past_key_values, length
                 rows = [result.logits[0, -1:].float().cpu()]
@@ -83,8 +85,8 @@ def prepare_hf(model_dir: Path, output: Path) -> None:
         "reference": "huggingface-eager-bfloat16-teacher-forced",
         "torch": torch.__version__,
         "transformers": transformers.__version__,
-        "tolerance": LogprobTolerance().model_dump(),
-        "calibration": {"status": "pending"},
+        "tolerance": DEFAULT_TOLERANCE.model_dump(),
+        "calibration": {"status": "fixed", "rule": "top2/100%/0.02, never calibrated upward"},
         "cases": cases,
     }
     output.write_text(json.dumps(bundle, indent=2) + "\n")
@@ -128,26 +130,18 @@ def calibrate_vllm(model_dir: Path, output: Path) -> None:
                 reference_token_logprob=observed[expected.top_token_ids[0]].logprob,
             )
         )
-    report = compare_logprobs(reference, candidate, LogprobTolerance(max_reference_top1_delta=100))
-    if report.mutual_top5_rate < DEFAULT_TOLERANCE.min_mutual_top5_rate:
-        message = f"vLLM control fails mutual top-five gate: {report}"
-        raise ValueError(message)
-    error = report.max_reference_top1_delta
-    margin = DEFAULT_TOLERANCE.max_reference_top1_delta
-    limit = margin if error <= margin else error + margin
-    bundle["tolerance"] = LogprobTolerance(max_reference_top1_delta=limit).model_dump()
-    bundle["calibration"] = {
-        "status": "measured",
+    report = compare_logprobs(reference, candidate, DEFAULT_TOLERANCE)
+    diagnostic = {
+        "status": "passed" if report.passed else "failed",
         "vllm": vllm.__version__,
         "torch": torch.__version__,
-        "positions": report.positions,
-        "mutual_top5_rate": report.mutual_top5_rate,
-        "max_reference_top1_delta": error,
-        "selected_limit": limit,
-        "rule": "0.2 if vLLM max <= 0.2, otherwise vLLM max + 0.2",
+        "comparison": report.model_dump(),
+        "rule": "diagnostic only; fixed reference and 0.02 policy are unchanged",
     }
-    output.write_text(json.dumps(bundle, indent=2) + "\n")
-    sys.stdout.write(json.dumps(bundle["calibration"]) + "\n")
+    output.with_name("vllm-diagnostic.json").write_text(json.dumps(diagnostic, indent=2) + "\n")
+    sys.stdout.write(json.dumps(diagnostic) + "\n")
+    if not report.passed:
+        raise SystemExit(1)
 
 
 def main() -> None:

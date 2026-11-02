@@ -12,7 +12,6 @@ from typing import Literal
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
-from transformers import AutoTokenizer
 
 from vs_bench.logprobs import LogprobTolerance, TokenLogprobs, compare_logprobs
 
@@ -55,24 +54,63 @@ class ReferenceCase(ProbeReply):
         return self
 
 
+class FixedPolicy(Contract):
+    """Reference metadata describes a fixed rule, never an adjustable calibration."""
+
+    status: Literal["fixed"]
+    rule: Literal["top2/100%/0.02, never calibrated upward"]
+
+
 class ReferenceBundle(Contract):
-    """Immutable reference and independently calibrated policy, shared across evaluations."""
+    """Six fixed 50-token schedules; reference contents cannot shrink the denominator."""
 
     schema_version: Literal[1]
     model: Literal["Qwen/Qwen3-32B"]
     vocabulary: int = Field(ge=5)
     config_sha256: str
     weights_index_sha256: str
-    reference: str
+    reference: Literal["huggingface-eager-bfloat16-teacher-forced"]
     torch: str
     transformers: str
     tolerance: LogprobTolerance
-    calibration: dict
-    cases: list[ReferenceCase] = Field(min_length=1)
+    calibration: FixedPolicy
+    cases: list[ReferenceCase] = Field(min_length=6, max_length=6)
+
+    @model_validator(mode="after")
+    def fixed_experiment(self) -> ReferenceBundle:
+        expected_policy = LogprobTolerance(
+            top_k=2, min_mutual_top5_rate=1, max_reference_top1_delta=0.02
+        )
+        if self.tolerance != expected_policy:
+            raise ValueError("tolerance must be fixed top2/100%/0.02; no calibration margin")
+        expected = [
+            (f"{name}-{plan}", length, chunks)
+            for name, length in (("python-short", 32), ("cpp-medium", 128), ("python-long", 256))
+            for plan, chunks in (("decode", [1] * 50), ("chunk", [1, 4, 1, 2] * 6 + [1, 1]))
+        ]
+        for case, (name, length, chunks) in zip(self.cases, expected, strict=True):
+            if (
+                case.name != name
+                or case.prefill_length != length
+                or case.decode_chunk_sizes != chunks
+                or len(case.input_ids) != length + 50
+                or len(case.rows) != 51
+            ):
+                raise ValueError(f"{name}: expected fixed prefix/{length}, 50 continuation/51 rows")
+            if any(not 0 <= token < self.vocabulary for token in case.input_ids):
+                raise ValueError(f"{name}: input_ids outside vocabulary")
+            if any(token >= self.vocabulary for row in case.rows for token in row.top_token_ids):
+                raise ValueError(f"{name}: reference top IDs outside vocabulary")
+        for first, second in zip(self.cases[::2], self.cases[1::2], strict=True):
+            if first.input_ids != second.input_ids:
+                raise ValueError("decode/chunk plans must use the same fixed token prefix")
+        return self
 
 
 def check(args: argparse.Namespace) -> int:
     """Use the same fixed token prefixes in every engine; never compare diverging generations."""
+    from transformers import AutoTokenizer
+
     here = Path(__file__).resolve().parent
     bundle = ReferenceBundle.model_validate_json((here / "reference_logprobs.json").read_bytes())
     for filename, expected in (
@@ -162,7 +200,7 @@ def check(args: argparse.Namespace) -> int:
                 "passed": report.passed,
                 "reference": bundle.reference,
                 "tolerance": bundle.tolerance.model_dump(),
-                "calibration": bundle.calibration,
+                "calibration": bundle.calibration.model_dump(),
                 "comparison": report.model_dump(),
             }
         ),
