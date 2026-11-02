@@ -22,8 +22,14 @@ from qwen3_single_optimization.core import (
     slots,
     verify_ab,
 )
+from tests.support.task_project import write_task
 
+from entrypoints import cli
+from entrypoints.cli.loops import validated_run_request
+from vibesys.api import agent_spec_from_config
+from vibesys.api.catalog import MULTI
 from vs_prompts.api import TemplateRenderer
+from vs_sim.api.testing import ScriptedProbe
 
 TEMPLATES = Path(__file__).parents[1] / "templates"
 
@@ -226,13 +232,13 @@ def test_reapproval_requires_explicit_obsolete_checkpoint(
             can_replace_approval(previous, "new", acknowledged)
 
 
-def test_fixed_five_round_public_launch_contract() -> None:
+def test_fixed_five_round_public_launch_contract(tmp_path: Path) -> None:
     spec = RunSpec(
         slot=slots("pilot")[0],
         attempt=1,
         source=Path("/source"),
         experiment=Path("/experiment"),
-        run=Path("/experiment/runs/pilot"),
+        run=tmp_path / "pilot",
         run_id="pilot",
         tested_commit="a" * 40,
         branch="test",
@@ -254,9 +260,30 @@ def test_fixed_five_round_public_launch_contract() -> None:
     }.items():
         assert args[args.index(flag) + 1] == value
     assert "--no-skills" not in args
-    assert {args[index + 1] for index, value in enumerate(args) if value == "--role-model"} == {
-        f"{role}=gpt-6.1-sol" for role in ("orchestrator", "profiler", "implementer", "judge")
-    }
+    write_task(
+        spec.run / "project",
+        'version = 1\nbackends = ["cuda"]\n[agent]\ndomain = "llm-serving"\n'
+        '[accuracy]\ncommand = ["python", "checker.py"]\n'
+        '[benchmark]\ncommand = ["python", "benchmark.py"]\n',
+    )
+    config_path = tmp_path / "agent.toml"
+    config_path.write_text('[model]\nname = "overridden-by-global-cli-model"\n')
+    invocation = cli.parse_cli_invocation([*args[3:], "--config", str(config_path)])
+    probe = ScriptedProbe(lambda _argv: None)
+    request, config = validated_run_request(invocation.args, probe=probe)
+    assert request.orchestration.id == MULTI.plugin.id
+    assert MULTI.plugin.agents
+    assert config.agent.roles == {}
+    default = agent_spec_from_config(
+        config,
+        backend=request.agent_backend,
+        provider=request.cli_provider,
+        allow_unvetted_model=request.allow_unvetted_model,
+    )
+    assert default.provider == "copilot"
+    assert default.model == "gpt-6.1-sol"
+    assert all(role.id not in config.agent.roles for role in MULTI.plugin.agents)
+    assert probe.calls == []
     with pytest.raises(ValidationError):
         RunSpec.model_validate({**spec.model_dump(), "max_rounds": 24})
 

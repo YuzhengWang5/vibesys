@@ -476,11 +476,6 @@ def framework_args(spec: RunSpec) -> list[str]:
         spec.provider,
         "--model",
         spec.agent_model,
-        *[
-            argument
-            for role in ("orchestrator", "profiler", "implementer", "judge")
-            for argument in ("--role-model", f"{role}={spec.agent_model}")
-        ],
         "--allow-unvetted-model",
         "--backend",
         "cuda",

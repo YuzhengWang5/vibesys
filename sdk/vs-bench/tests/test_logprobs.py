@@ -7,7 +7,13 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 # test-isolation: vs-bench publishes numerical modules directly, not through an api package.
-from vs_bench.logprobs import LogprobTolerance, TokenLogprobs, compare_logprobs, summarize_logits
+from vs_bench.logprobs import (
+    LogprobComparison,
+    LogprobTolerance,
+    TokenLogprobs,
+    compare_logprobs,
+    summarize_logits,
+)
 
 
 @given(st.floats(min_value=-100, max_value=100, allow_nan=False))
@@ -149,3 +155,17 @@ def test_queried_probability_cannot_hide_a_threshold_exceedance() -> None:
     )
     with pytest.raises(ValueError, match="disagrees"):
         compare_logprobs([reference], [forged], STRICT)
+
+
+def test_legacy_top5_reports_keep_their_default_policy() -> None:
+    report = LogprobComparison.model_validate(
+        {
+            "passed": True,
+            "positions": 1,
+            "mutual_top5_rate": 1,
+            "max_reference_top1_delta": 0,
+            "top5_failed_positions": [],
+            "logprob_failed_positions": [],
+        }
+    )
+    assert report.top_k == 5

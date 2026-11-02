@@ -67,7 +67,7 @@ class LogprobComparison(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     passed: bool
-    top_k: int
+    top_k: int = Field(default=TOP_K, ge=1, le=TOP_K, strict=True)
     positions: int
     mutual_top5_rate: float
     max_reference_top1_delta: float
