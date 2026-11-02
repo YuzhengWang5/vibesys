@@ -82,6 +82,12 @@ Never rely on a provider flag for isolation. See
    `DockerSandbox`. Read-only and hidden paths reach a container through
    `docker_project_path_resources`: read-only paths are re-mounted read-only,
    hidden paths are overlaid with empty operator-owned masks.
+   The same policy covers the read-only `/opt/vibesys-history` alias; a
+   second mount must not expose a hidden project path. The framework checkout
+   stays readable, except for its host-only `support/` tools. Public runtime
+   regression tests in `libs/vs-runtime/tests/test_container_visibility.py`
+   and the real-container test in
+   `tests/minimal_container/test_container_visibility.py` enforce these views.
 
 ### Operator controls
 
