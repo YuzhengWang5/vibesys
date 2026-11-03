@@ -28,3 +28,41 @@ benchmark 请求可含 `prediction.content`；它是输入数据，而不是额�
 
 完成后保留未经优化基线和优化候选的源码、准确性与吞吐证据、激活证据及局限。
 若没有可信正收益，应如实报告失败，不得宣称成功。
+{% if objective_variant | default("generic") == "full-decode" %}
+
+## 本次唯一优化的具体要求：单 token decode 全图捕获
+
+必须实现整个生产 single-token decode forward 的端到端 CUDA Graph 捕获。
+每个已声明长度 bucket 的一次 decode，只能用一次完整模型 graph replay 完成：
+token embedding、所有 decoder 层的 input norm、独立 Q/K/V projections、head norm、
+RoPE、位置/mask处理、真实KV读写、attention、o_proj、residual、MLP、
+final norm 和完整 lm_head logits 均须在同一 captured graph 内。
+输出采样和SSE的CPU操作可在图外，但不能把任一模型层或attention留在eager路径。
+不得以逐层图、MLP图、跨层partial图、多次子图replay或仅预建图冒充全图。
+
+prefill和多token teacher-forcing可保留eager；生产single-token continuation和精度
+观测中的single-token continuation必须实际走上述全图。图内使用当前请求token、
+位置、KV长度和mask，不能冻结捕获时位置或重放旧输入。KV地址、位置输入和输入
+staging存储必须稳定，未使用KV区域不能进入attention概率；请求重置、长短请求、
+长度bucket切换和上下文边界必须正确。warmup/capture不污染真实请求状态。
+必要的静态存储、预分配或capture-compatible状态改造只用于使全图合法；
+控制A与优化B必须共享相同算术、KV存储及mask表示，用eager/replay开关隔离收益，
+不能把KV架构、attention算法或不同算术的改动归因于本次唯一调度优化。
+
+只针对完整decode graph排障与优化，直到真实accuracy及benchmark通过或五轮耗尽。
+捕获或replay失败必须显式报错，不允许静默退回partial/eager而宣称完成。
+提交源码边界及真实运行的全图replay证据；若预算内只做出partial，明确报告未满足
+本次要求，不得用其吞吐或正确性通过伪装为full-decode成功。
+{% elif objective_variant | default("generic") == "guided" %}
+
+## 本次唯一优化的具体实现路线
+
+以下内容是本次需独立实现的算法与状态约束。照此路线实施，不改变其关键捕获边界、
+匹配规则或门控语义；工程命名及模块组织自行决定。不得读取任何历史候选源码或成绩。
+
+{% if optimization == "cuda-graph" %}
+{% include "cuda-graph-guide.md" %}
+{% elif optimization == "speculative-decoding" %}
+{% include "prediction-speculative-decoding-guide.md" %}
+{% endif %}
+{% endif %}

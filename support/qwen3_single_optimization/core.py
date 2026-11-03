@@ -75,6 +75,7 @@ class RunSpec(Contract):
     agent_model: Literal["gpt-6.1-sol"] = "gpt-6.1-sol"
     max_rounds: Literal[5] = 5
     max_in_flight: Literal[1] = 1
+    objective_variant: Literal["generic", "full-decode", "guided"] = "generic"
 
 
 class RunState(Contract):

@@ -176,10 +176,12 @@ def latest_specs(experiment: Path, phase: str) -> list[RunSpec]:
     return list(latest.values())
 
 
-def clean_docs(project: Path, optimization: str) -> str:
+def clean_docs(project: Path, optimization: str, objective_variant: str = "generic") -> str:
     """Render task-owned goals and remove inherited combined-algorithm directives."""
     renderer = TemplateRenderer(HERE / "templates")
-    objective = renderer.render_template("OBJECTIVE.md.j2", optimization=optimization)
+    objective = renderer.render_template(
+        "OBJECTIVE.md.j2", optimization=optimization, objective_variant=objective_variant
+    )
     (project / TASK / "OBJECTIVE.md").write_text(objective)
     for document, relative in (
         ("root", Path("README.md")),
@@ -212,7 +214,9 @@ def trusted_files(project: Path) -> dict[str, str]:
     return {path.relative_to(project).as_posix(): digest(path) for path in sorted(paths)}
 
 
-def export_candidate(source: Path, project: Path, head: str, slot: Slot) -> str:
+def export_candidate(
+    source: Path, project: Path, head: str, slot: Slot, objective_variant: str = "generic"
+) -> str:
     """Export a clean bundle and initialize new independent candidate history."""
     archive = command_bytes(["git", "archive", f"{head}:{BUNDLE}"], cwd=source)
     with tarfile.open(fileobj=io.BytesIO(archive)) as tree:
@@ -223,7 +227,7 @@ def export_candidate(source: Path, project: Path, head: str, slot: Slot) -> str:
         sdk_roots=SDKRoots(checkout=source / "sdk", packaged=None),
         copy_directory=copy_directory,
     )
-    objective = clean_docs(project, slot.optimization.value)
+    objective = clean_docs(project, slot.optimization.value, objective_variant)
     if "/v1/logprobs" not in (project / TASK / "accuracy_checker/README.md").read_text():
         fail("导出 bundle 尚无新 logprob accuracy gate; 拒绝准备。")
     reference = json.loads(
@@ -254,7 +258,12 @@ def export_candidate(source: Path, project: Path, head: str, slot: Slot) -> str:
 
 
 def prepare_run(
-    source: Path, experiment: Path, slot: Slot, previous: RunSpec | None = None
+    source: Path,
+    experiment: Path,
+    slot: Slot,
+    previous: RunSpec | None = None,
+    *,
+    objective_variant: str = "generic",
 ) -> RunSpec:
     """Persist a fresh attempt and provenance before any GPU work."""
     head, branch = checkpoint(source)
@@ -268,7 +277,7 @@ def prepare_run(
     for name in ("control.sh", "launch.sh"):
         shutil.copy2(HERE / name, run / "scripts" / name)
     (run / "scripts/source.txt").write_text(str(source) + "\n")
-    objective = export_candidate(source, run / "project", head, slot)
+    objective = export_candidate(source, run / "project", head, slot, objective_variant)
     (run / "scripts/OBJECTIVE.md").write_text(objective)
     script_hashes = {
         path.relative_to(run / "scripts").as_posix(): digest(path)
@@ -291,6 +300,7 @@ def prepare_run(
         script_sha256=script_hashes,
         python=PYTHON,
         model=MODEL,
+        objective_variant=objective_variant,
     )
     save(run / "scripts/spec.json", spec)
     (run / "scripts/SHA256SUMS").write_text(
