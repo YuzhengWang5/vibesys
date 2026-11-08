@@ -19,7 +19,7 @@ max-in-flight=1。不自动降精度、不改可信评测、不复用失败 atte
 - attempt: {{ spec.attempt }}；retry_of: {{ spec.retry_of }}
 - framework run_id: `{{ spec.run_id }}`
 - 模型：`{{ spec.model }}`，BF16；evaluator 挂载 `/model`
-- setup: outer-loop=agent；Copilot CLI gpt-6.1-sol；max-rounds=5；max-in-flight=1
+- setup: outer-loop={{ spec.outer_loop }}；{{ spec.provider }} CLI {{ spec.agent_model }}；max-rounds={{ spec.max_rounds }}；max-in-flight={{ spec.max_in_flight }}
 - 设备 CUDA_VISIBLE_DEVICES：`{{ state.cuda_visible_devices }}`
 - 状态：{{ state.status }}；更新时间：{{ state.updated_at }}
 - OBJECTIVE SHA256：`{{ spec.objective_sha256 }}`（快照与脚本 hashes 在 scripts/）

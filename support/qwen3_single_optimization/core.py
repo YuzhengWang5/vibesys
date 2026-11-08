@@ -72,7 +72,7 @@ class RunSpec(Contract):
     max_run_seconds: int = Field(default=21600, ge=1)
     outer_loop: Literal["agent"] = "agent"
     provider: Literal["copilot"] = "copilot"
-    agent_model: Literal["gpt-6.1-sol"] = "gpt-6.1-sol"
+    agent_model: Literal["gpt-6.1-sol", "grok-4.7", "gemini-4-argon"] = "gpt-6.1-sol"
     max_rounds: Literal[5] = 5
     max_in_flight: Literal[1] = 1
     objective_variant: Literal["generic", "full-decode", "guided"] = "generic"

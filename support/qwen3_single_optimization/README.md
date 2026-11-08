@@ -36,6 +36,9 @@ bash "$control" inspect --run /absolute/pilot
 启动前保存 nvidia-smi，显式记录/export CUDA_VISIBLE_DEVICES，拒绝卡上已有计算进程。
 每次框架预算固定 outer-loop=agent、Copilot CLI gpt-6.1-sol、
 max-rounds=5、max-in-flight=1、evaluation-slots=1；单 run 安全墙钟上限 6 小时。
+模型对照实验可在独立 RunSpec 中显式指定 `grok-4.7` 或 `gemini-4-argon`；
+默认仍为 `gpt-6.1-sol`，未知模型拒绝解析，轮次与评测预算不变。
+各 run 的 README 从实际 `spec.agent_model` 生成，不以默认模型代替实际配置。
 进程被中断时先转发中断并等待，之后仅清理本 run 标签的 Docker 容器。
 
 ## Pilot 开闸

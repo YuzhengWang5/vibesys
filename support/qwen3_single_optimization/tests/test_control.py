@@ -223,7 +223,8 @@ def test_reapproval_requires_explicit_obsolete_checkpoint(
             can_replace_approval(previous, "new", acknowledged)
 
 
-def test_fixed_five_round_public_launch_contract() -> None:
+@pytest.mark.parametrize("agent_model", [None, "gpt-6.1-sol", "grok-4.7", "gemini-4-argon"])
+def test_fixed_five_round_public_launch_contract(agent_model: str | None) -> None:
     spec = RunSpec(
         slot=slots("pilot")[0],
         attempt=1,
@@ -240,11 +241,14 @@ def test_fixed_five_round_public_launch_contract() -> None:
         python=Path("/python"),
         model=Path("/model"),
     )
+    if agent_model is not None:
+        spec = RunSpec.model_validate({**spec.model_dump(), "agent_model": agent_model})
+    spec = RunSpec.model_validate_json(spec.model_dump_json())
     args = framework_args(spec)
     for flag, value in {
         "--outer-loop": "agent",
         "--cli-provider": "copilot",
-        "--model": "gpt-6.1-sol",
+        "--model": agent_model or "gpt-6.1-sol",
         "--max-rounds": "5",
         "--max-in-flight": "1",
         "--evaluation-slots": "1",
@@ -253,6 +257,12 @@ def test_fixed_five_round_public_launch_contract() -> None:
     assert "--no-skills" not in args
     with pytest.raises(ValidationError):
         RunSpec.model_validate({**spec.model_dump(), "max_rounds": 24})
+    with pytest.raises(ValidationError):
+        RunSpec.model_validate({**spec.model_dump(), "agent_model": "unregistered-model"})
+    record = TemplateRenderer(TEMPLATES).render_template(
+        "record.md.j2", document="run", spec=spec, state=RunState(updated_at="fixed-input")
+    )
+    assert f"{spec.provider} CLI {spec.agent_model}" in record
 
 
 def test_acknowledgement_never_skips_pilot_or_unfinished_trials() -> None:
