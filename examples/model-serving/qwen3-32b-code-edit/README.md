@@ -28,3 +28,8 @@ accuracy 保留已校准的 HF BF16 teacher-forced gate：54 个位置，
 
 实现范围见 [OBJECTIVE.md](.vibesys/tasks/default/OBJECTIVE.md)。
 候选不得修改可信输入、门禁阈值或基准。
+
+基线之后依次实施权重量化、FlashInfer、算子融合、原 prompt n-gram 投机解码、
+CUDA Graph。每个 outerloop 只做当前一项，争取在五次 innerloop 机会内完成，
+允许多轮继续同一项。serial multi-agent 启动时显式传
+`--max-retries-per-round 5`；不修改整个框架的默认预算。
