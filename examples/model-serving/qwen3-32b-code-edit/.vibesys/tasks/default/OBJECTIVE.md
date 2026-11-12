@@ -1,32 +1,30 @@
-# 单一优化：CUDA Graph
+# Qwen3-32B code-edit：最大聚合吞吐
 
-在 Qwen/Qwen3-32B 的 code-debug 工作负载上提高单请求、concurrency=1 的
-端到端 completion throughput。唯一性能指标为原始 benchmark JSON 的
-`median_tok_per_sec`，按拼接输出重新 tokenize 计数。
+在 CodeEditorBench code-debug 工作负载上优化 Qwen/Qwen3-32B 的多请求服务能力。
+唯一性能目标是 benchmark JSON 的 **`max_throughput_tok_per_sec`**：
+在固定并发度 **2、4、8、16** 中，取 `总输出 token / 稳态墙钟秒` 最大值。
+不是 concurrency=1，也不是单请求中位 tok/s。所有点使用相同样本和生成预算，
+保留完整曲线与 `best_concurrency`；任何请求错误或空输出使整次评测失败。
 
-本次唯一允许的宏观性能优化是 **CUDA Graph**。整个 agent outerloop
-预算为 5 轮，只围绕这一项实现、排障和验证，直到跑通并观察到可归因的
-优化效果；不得转向或叠加任何其他性能机制。必要的服务、依赖和正确性修复
-可以进行，但不得伪装成初始化而引入额外优化。
+先建立正确可测的 eager BF16 AR 服务基线，再围绕一个宏观优化进行实现、排障与
+正式验证，不把多个独立机制捆绑。支持多请求、正确的请求级 KV 隔离和服务生命周期
+是工作负载基础要求，不可通过串行客户端伪造并发吞吐。
+先提名基线供框架正式 accuracy/benchmark，再提交优化候选；
+in-turn 自测不能代替 baseline/official receipts。如无收益，应保留可信 incumbent。
 
-先建立并测量未优化的 BF16 eager 自回归服务基线，保持原始权重和计算精度。
-随后仅实施上述唯一优化，用同一 workload、设备、精度和评测命令进行
-未优化/优化生产路径 A/B。记录真实激活证据和吞吐差异；无提升或未通过
-正确性时如实报告，不把不同配置、额外机制或噪声归因为本次优化。
+## 输入与精度
 
-## 生产服务与精度
-
-- 项目根提供前台 `run_server.sh --model-dir /model --port PORT`；
-  `/health` 在真实模型就绪后才返回 200。正式评测每次使用新环境，
-  不依赖遗留服务。提交评测前停止自测服务，避免同卡双份模型。
-- 提供 streaming `POST /v1/completions`；`prompt_is_preformatted=true`
-  时原样 tokenize，不再套 chat template。关闭 thinking。
-- 接受 `prediction.content`，它只是请求中的候选文本提示，不属于 prompt；
-  是否使用该提示必须遵守本次唯一优化边界。
-- SSE 文本必须正确重建输出，不得截断合法 Unicode、虚构字符或重放缓存答案。
-  chunk 数不是 token 数。
-- 完整实现只读 `accuracy_checker/README.md` 规定的 teacher-forced logprob 观测接口
-  及 SSE token ID 观测。观测必须经过同一生产 forward、权重、attention、
-  KV 管理和实际启用的优化，禁止另起参考模型旁路。
-- 使用 manifest 的标准 accuracy 工具核验原生 Hugging Face BF16 logprobs
-  和实际生成决策。不得修改、替换、弱化 checker、参考模型、阈值或 benchmark。
+- 请求只发送原 prompt，不包含独立草稿或答案字段。n-gram 投机草稿只能从
+  **当前请求原 prompt 的 token** 查找，不能读取 gold、参考文件或历史请求答案。
+  草稿必须由同一生产 target forward 验证，禁止 echo、答案缓存及猜测 gate 输出。
+- 前台 `run_server.sh --model-dir /model --port PORT`，真实模型就绪后 health 才返回 200；
+  streaming `/v1/completions`，原样 tokenize preformatted prompt，关闭 thinking。
+- 正确重建 Unicode SSE；输出 token 按完整文本重新 tokenize，不按 chunk 计数。
+  每个请求均真实执行模型，保持请求状态隔离、EOS 和 max_tokens 语义。
+- 实现 `accuracy_checker/README.md` 的 `/v1/logprobs` 和 SSE token ID 观测，
+  复用生产 forward、权重、精度、attention、KV 及实际启用的优化，不另设 HF 旁路。
+  HF BF16 参考固定：54 个 teacher-forced 位置，双向 top-5 至少 95%，
+  HF top-1 token 的 logprob 最大绝对差 **<=0.2**。
+- 不得修改 checker、reference、manifest、benchmark、SDK 或门槛；
+  同一 workload、设备、生成参数和并发 sweep 下比较可信 revision，保留激活证据与局限。
+- 任务约束优先于通用 skills 的生产性能建议；不要为了满足通用 floor 提前叠加优化。

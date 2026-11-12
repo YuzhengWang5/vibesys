@@ -57,9 +57,11 @@ def inspect_run(project_path: Path, run_id: str) -> Inspection:
             fail(f"证据 ledger 缺失或 purpose 不符: {ref.key}")
         if entry.evidence.outcome is EvidenceOutcome.FAILED:
             fail(f"core/ledger 成败不一致: {ref.key}")
-        metrics = [item for item in entry.evidence.metrics if item.name == "median_tok_per_sec"]
+        metrics = [
+            item for item in entry.evidence.metrics if item.name == "max_throughput_tok_per_sec"
+        ]
         if len(metrics) != 1:
-            fail(f"缺少唯一 median_tok_per_sec: {ref.key}")
+            fail(f"缺少唯一 max_throughput_tok_per_sec: {ref.key}")
         readings.append(
             Measurement(
                 request_id=ref.source_request.root,

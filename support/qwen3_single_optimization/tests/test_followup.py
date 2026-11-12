@@ -65,6 +65,6 @@ def test_followup_objective_enforces_exact_route_without_history(slot: Slot, var
         assert "捕获止于下一层 RoPE 之前" in rendered
         assert "一次完整模型 graph replay" not in rendered
     else:
-        assert "连续两次" in rendered
-        assert "重新匹配成功后" in rendered
-        assert "不转为 sticky cursor" in rendered
+        assert "本次 HTTP 请求原 prompt" in rendered
+        assert "回滚 KV" in rendered
+        assert "prediction.content" not in rendered

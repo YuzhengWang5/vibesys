@@ -111,7 +111,7 @@ def check(args: argparse.Namespace) -> int:
             add_generation_prompt=True,
             enable_thinking=False,
         )
-        for prediction in ("", "def add(a, b):\n    return a + b\n"):
+        for budget in (1, 8):
             generated, fragments, done = [], [], False
             with client.stream(
                 "POST",
@@ -119,8 +119,7 @@ def check(args: argparse.Namespace) -> int:
                 json={
                     "prompt": prompt,
                     "prompt_is_preformatted": True,
-                    "prediction": {"type": "content", "content": prediction},
-                    "max_tokens": 8,
+                    "max_tokens": budget,
                     "temperature": 0,
                     "stream": True,
                     "return_token_ids": True,
@@ -148,8 +147,10 @@ def check(args: argparse.Namespace) -> int:
                         )
                     generated.extend(ids)
                     fragments.append(choice.get("text", ""))
-            if not done or not 1 <= len(generated) <= 8:
-                raise ValueError("completion must finish with 1..8 generated token IDs and [DONE]")
+            if not done or not 1 <= len(generated) <= budget:
+                raise ValueError(
+                    f"completion must finish with 1..{budget} generated token IDs and [DONE]"
+                )
             text = tokenizer.decode(
                 generated, skip_special_tokens=True, clean_up_tokenization_spaces=False
             )

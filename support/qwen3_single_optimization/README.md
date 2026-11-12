@@ -1,5 +1,10 @@
 # Qwen3 单优化实验控制器
 
+当前 code-edit 输入已切换为并发 2/4/8/16 的最大聚合吞吐
+`max_throughput_tok_per_sec`，不再使用单请求指标。所有请求只发送原 prompt；
+n-gram 草稿必须从本请求原 prompt 查找，旧额外草稿路线不再适用。
+此目录仍是历史单因素队列工具，不是新有序优化序列的运行入口。
+
 操作者工具，不是框架功能。只写本目录和新实验产物，不改 task bundle、
 gate 或 SDK。`prepare` 不启动 GPU；只有 `queue` 与其内部 `worker` 执行实验。
 使用现有 `.venv` Python，脚本显式设置新 worktree 的 PYTHONPATH，不运行 `uv sync`。

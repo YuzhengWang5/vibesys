@@ -46,7 +46,8 @@ clean_up_tokenization_spaces=False` decode 后必须与拼接文本一致，最�
 
 三个短代码上下文，prefill 长度 32/128/256，各续写 8 token。每个上下文分别运行
 单 token 和 `[1,4,1,2]` chunk 计划，共六次请求、54 个 teacher-forced 位置。
-另有两次最多 8 token 的 SSE 协议确认，覆盖空和非空 prediction。不比对完整 logits、
+另有两次分别最多 1/8 token 的 SSE 协议确认，均只发送原 prompt，不提供额外草稿。
+不比对完整 logits、
 cosine、RMSE、尾部词表或整段生成逐字一致；允许近似并列最大值交换及优化舍入差异。
 
 1. 至少 95% 的全部位置，同时满足 HF top-1 在候选 top-5 内，候选 top-1 在
