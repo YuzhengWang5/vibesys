@@ -1,12 +1,15 @@
-# Open-loop 有序优化实验
+# Open-loop 自主优化实验
 
 默认 code-edit 输入采用独立 Poisson 到达负载，不再固定客户端并发。
-请求率 0.25/1/4/16 req/s，每点相同 64 样本、3 warmup、512 token 预算，
-完整排空并保留错误、客户端派发延误与实际在途数。详见示例 benchmark README。
+只测 5 req/s 一个点，64 样本、3 warmup、512 token 预算。
+拒绝或 drop 后在逻辑请求总期限内重试，失败尝试与退避计入完整排空墙钟，
+成功输出仅计一次；保留重试原因、客户端派发延误与实际在途数。
+详见示例 benchmark README。
 
-优化序列为 FlashInfer → 算子融合 → continuous batching → 当前原 prompt
-n-gram 投机解码 → CUDA Graph。outerloop 为 agent，最多 10 轮，
-每轮 innerloop 五次 implementer 机会；同一优化可跨轮，不能叠加或跳项。
+可选方向为 FlashInfer、算子融合、continuous batching、dynamic batching
+（含多请求组批调度）、当前原 prompt n-gram 投机解码、CUDA Graph。
+agent 自选顺序。outerloop 为 agent，最多 20 轮，
+每轮 innerloop 五次 implementer 机会；同一优化可跨轮，每轮最多实施一项。
 BF16 和固定 0.2 teacher-forced gate 不变。
 
 ## Token 统计
@@ -49,7 +52,7 @@ tested_commit、agentshim pin、GPU 空闲，显式设置设备、模型与轮�
 - `logs/monitor-status.json`：当前优化、最后 gate、已完成轮次、事件停滞时间。
 - `logs/alerts.jsonl`：失败 gate / agent 调用，立即记录；候选问题先由该轮
   有限 innerloop 修复，不能绕过准确性或更改可信负载。
-- `logs/monitor-exit.json`：真实退出码。统计缺失、超过十轮或超出最长评测
+- `logs/monitor-exit.json`：真实退出码。统计缺失、超过二十轮或超出最长评测
   仍无事件会请求合作停止；监控器崩溃也会收回自己启动的框架进程。
 
 所有假设使用 OBJECTIVE 规定的稳定阶段前缀；未关联的规划成本单列，

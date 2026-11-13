@@ -116,7 +116,7 @@ async def test_requests_overlap_without_out_of_band_drafts(sim: Sim) -> None:
 async def test_slow_responses_do_not_throttle_arrivals(sim: Sim) -> None:
     benchmark = runpy.run_path(str(BENCHMARK))
     count = 40
-    offsets = benchmark["arrival_offsets"](count, 16, 42)
+    offsets = benchmark["arrival_offsets"](count, 5, 42)
     started: list[float] = []
     completed: list[float] = []
     release = asyncio.Event()
@@ -132,7 +132,7 @@ async def test_slow_responses_do_not_throttle_arrivals(sim: Sim) -> None:
 
     results, duration, load = await benchmark["dispatch_open_loop"](
         count,
-        16,
+        5,
         42,
         send,
         clock=sim.clock.now,
@@ -144,6 +144,119 @@ async def test_slow_responses_do_not_throttle_arrivals(sim: Sim) -> None:
     assert load["observed_peak_in_flight"] == count
     assert load["max_dispatch_lag_sec"] == pytest.approx(0)
     assert duration >= offsets[-1]
+
+
+async def test_rejected_and_dropped_requests_retry_without_throttling_arrivals(sim: Sim) -> None:
+    benchmark = runpy.run_path(str(BENCHMARK))
+    bodies: list[dict] = []
+    started: list[float] = []
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        bodies.append(body)
+        if body["prompt"] == "original_0":
+            attempts = sum(b["prompt"] == "original_0" for b in bodies)
+            if attempts == 1:
+                return httpx.Response(429, text="engine queue full")
+            if attempts == 2:
+                return httpx.Response(200, text='data: {"choices":[{"text":"discard"}]}\n\n')
+        return httpx.Response(200, text='data: {"choices":[{"text":"fixed"}]}\n\ndata: [DONE]\n\n')
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+
+        async def send(index: int) -> dict:
+            started.append(sim.clock.now())
+            return await benchmark["send_request"](
+                client,
+                "http://in-memory/v1/completions",
+                f"original_{index}",
+                8,
+                0,
+                CharacterTokenizer(),
+                sample_id=str(index),
+                clock=sim.clock.now,
+                sleep=sim.clock.sleep,
+            )
+
+        results, duration, _load = await benchmark["dispatch_open_loop"](
+            4, 5, 42, send, clock=sim.clock.now, sleep=sim.clock.sleep
+        )
+    assert [value - started[0] for value in started] == pytest.approx(
+        benchmark["arrival_offsets"](4, 5, 42)
+    )
+    retried = results[0]
+    assert retried["attempts"] == 3
+    assert retried["retries"] == 2
+    assert retried["total_latency"] >= 0.75
+    assert retried["ttft"] >= 0.75
+    assert [a["discarded_output_tokens"] for a in retried["attempt_failures"]] == [0, 7]
+    repeated = [b for b in bodies if b["prompt"] == "original_0"]
+    assert repeated == [repeated[0]] * 3
+    report = benchmark["summarize_capacity"](results, duration, 5)
+    assert report["valid"]
+    assert report["total_output_tokens"] == 20
+    assert report["throughput_tok_per_sec"] == 20 / duration
+
+
+async def test_retry_deadline_exhaustion_cannot_score_partial_work(sim: Sim) -> None:
+    benchmark = runpy.run_path(str(BENCHMARK))
+
+    async def reject(_request: httpx.Request) -> httpx.Response:
+        await sim.clock.sleep(0.5)
+        return httpx.Response(503, text="engine rejected")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(reject)) as client:
+        result = await benchmark["send_request"](
+            client,
+            "http://in-memory/v1/completions",
+            "original",
+            8,
+            0,
+            CharacterTokenizer(),
+            clock=sim.clock.now,
+            sleep=sim.clock.sleep,
+            request_timeout=1,
+        )
+    assert "retry deadline exhausted" in result["error"]
+    assert result["total_latency"] >= 1
+    assert result["attempt_failures"]
+    report = benchmark["summarize_capacity"]([result, result], 2, 5)
+    assert not report["valid"]
+    assert report["throughput_tok_per_sec"] is None
+
+
+async def test_benchmark_runs_only_one_five_rps_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    benchmark = runpy.run_path(str(BENCHMARK))
+    calls: list[float] = []
+
+    async def level(
+        _args: argparse.Namespace,
+        _samples: list[dict],
+        _tokenizer: CharacterTokenizer,
+        rate: float,
+    ) -> dict:
+        calls.append(rate)
+        return {"valid": True, "request_rate": rate, "throughput_tok_per_sec": 12}
+
+    globals_ = benchmark["run_benchmark"].__globals__
+    monkeypatch.setitem(globals_, "_load_codeeditorbench", lambda *_args: [{}, {}])
+    monkeypatch.setitem(globals_, "_load_tokenizer", lambda _path: CharacterTokenizer())
+    monkeypatch.setitem(globals_, "run_level", level)
+    args = argparse.Namespace(
+        languages="python3",
+        max_input_chars=4000,
+        num_samples=2,
+        seed=42,
+        tokenizer_path="unused",
+        request_rate=5,
+        output_json=None,
+    )
+    report = await benchmark["run_benchmark"](args)
+    assert calls == [5]
+    assert report["request_rate"] == 5
+    assert report["max_throughput_tok_per_sec"] == 12
+    assert "rate_results" not in report
+    assert "best_request_rate" not in report
 
 
 @given(

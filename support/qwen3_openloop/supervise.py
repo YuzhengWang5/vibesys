@@ -14,7 +14,7 @@ from vs_project.api import Project
 from vs_sim.api import InheritedStdioLauncher, Signals, SystemClock
 
 LOGGER = logging.getLogger(__name__)
-MAX_ROUNDS = 10
+MAX_ROUNDS = 20
 MAX_IDLE_SECONDS = 12000
 
 

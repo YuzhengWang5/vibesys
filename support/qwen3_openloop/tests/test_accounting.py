@@ -70,3 +70,18 @@ def test_unknown_counts_are_not_zero_cost_and_unmatched_planning_stays_separate(
 def test_unknown_stage_is_not_guessed() -> None:
     with pytest.raises(ValueError, match="unattributable"):
         API["optimization"]("arbitrary-name")
+
+
+def test_agent_can_revisit_optimizations_and_choose_dynamic_batching_first() -> None:
+    events = [
+        *invocation(0, "multi-orchestrator", hypothesis="dynamic-batching-admission"),
+        *invocation(1, "multi-implementer"),
+        *invocation(2, "multi-orchestrator", hypothesis="prompt-ngram-source"),
+        *invocation(3, "multi-implementer"),
+        *invocation(4, "multi-orchestrator", hypothesis="dynamic-batching-tune"),
+        *invocation(5, "multi-judge"),
+    ]
+    report = API["summarize"](events)
+    assert report["by_optimization"]["dynamic-batching"]["input_tokens"] == 400
+    assert report["by_optimization"]["prompt-ngram"]["input_tokens"] == 200
+    assert not report["missing_usage"]

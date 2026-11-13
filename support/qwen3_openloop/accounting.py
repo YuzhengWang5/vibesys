@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-STAGES = ("baseline", "flashinfer", "fusion", "continuous-batching", "prompt-ngram", "cuda-graph")
+STAGES = (
+    "baseline",
+    "flashinfer",
+    "fusion",
+    "continuous-batching",
+    "dynamic-batching",
+    "prompt-ngram",
+    "cuda-graph",
+)
 COUNTERS = (
     "input_tokens",
     "output_tokens",

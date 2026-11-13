@@ -1,9 +1,9 @@
 """Measure aggregate code-edit capacity under independent open-loop arrivals.
 
 Only the original chat-templated prompt is sent: no out-of-band draft or answer.
-Each request-rate level uses the same samples and separate untimed warmup.
-The score is max(sum(retokenized output tokens) / measured wall seconds) over
-fully successful levels, never median per-request speed or SSE chunk count.
+One 5 RPS arrival schedule follows separate untimed warmup.
+The score is sum(retokenized successful output tokens) / measured wall seconds,
+including rejection/drop retries and drain, never per-request speed.
 """
 
 from __future__ import annotations
@@ -167,7 +167,7 @@ def _build_prompt(tokenizer, sample: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def send_request(
+async def _send_attempt(
     client: httpx.AsyncClient,
     url: str,
     prompt: str,
@@ -217,6 +217,86 @@ async def send_request(
     else:
         result["ttft"] = None
         result["tpot"] = None
+    return result
+
+
+async def send_request(
+    client: httpx.AsyncClient,
+    url: str,
+    prompt: str,
+    max_tokens: int,
+    temperature: float,
+    tokenizer,
+    model_name: str | None = None,
+    print_stream: bool = False,
+    sample_id: str | None = None,
+    clock: Callable[[], float] = time.perf_counter,
+    request_timeout: float = 3600.0,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> dict:
+    """Retry the same logical request within one total completion deadline."""
+    started = clock()
+    failures: list[dict] = []
+    result: dict[str, Any]
+    while True:
+        attempt_started = clock()
+        remaining = request_timeout - (attempt_started - started)
+        try:
+            async with asyncio.timeout(max(0.0, remaining)):
+                result = await _send_attempt(
+                    client,
+                    url,
+                    prompt,
+                    max_tokens,
+                    temperature,
+                    tokenizer,
+                    model_name,
+                    print_stream,
+                    sample_id,
+                    clock,
+                    remaining,
+                )
+        except TimeoutError:
+            result = {
+                "error": "logical request completion deadline exceeded",
+                "output_tokens": 0,
+                "num_chunks": 0,
+                "output_text": "",
+                "finish_reason": None,
+                "total_latency": clock() - attempt_started,
+                "ttft": None,
+                "tpot": None,
+            }
+        if result["error"] is None:
+            if result["ttft"] is not None:
+                result["ttft"] += attempt_started - started
+            break
+        failures.append(
+            {
+                "attempt": len(failures) + 1,
+                "offset_sec": attempt_started - started,
+                "duration_sec": clock() - attempt_started,
+                "error": result["error"],
+                "discarded_output_tokens": result["output_tokens"],
+            }
+        )
+        remaining = request_timeout - (clock() - started)
+        print(
+            f"[bench] sample={sample_id} attempt={len(failures)} failed: "
+            f"{result['error']}; remaining={remaining:.3f}s",
+            file=sys.stderr,
+        )
+        if remaining <= 0:
+            result["error"] = f"retry deadline exhausted: {result['error']}"
+            break
+        await sleep(min(0.25 * 2 ** min(len(failures) - 1, 5), 5.0, remaining))
+        if clock() - started >= request_timeout:
+            result["error"] = f"retry deadline exhausted: {failures[-1]['error']}"
+            break
+    result["total_latency"] = clock() - started
+    result["attempts"] = len(failures) + int(result["error"] is None)
+    result["retries"] = max(0, result["attempts"] - 1)
+    result["attempt_failures"] = failures
     return result
 
 
@@ -433,6 +513,7 @@ async def run_level(
                 sample_id=sample["unique_id"],
                 clock=clock,
                 request_timeout=args.request_timeout,
+                sleep=sleep,
             )
             result["sample_id"] = sample["unique_id"]
             result["language"] = sample["language"]
@@ -602,6 +683,19 @@ async def run_level(
         "num_steady": len(steady),
         "num_completed": len(successes),
         "num_failed": len(errors),
+        "total_attempts": sum(r["attempts"] for r in steady),
+        "total_retries": sum(r["retries"] for r in steady),
+        "failed_attempts": sum(len(r["attempt_failures"]) for r in steady),
+        "warmup_retries": sum(r["retries"] for r in results if r["is_warmup"]),
+        "retry_records": [
+            {
+                "sample_id": r["sample_id"],
+                "attempts": r["attempts"],
+                "failures": r["attempt_failures"],
+            }
+            for r in results
+            if r["attempt_failures"]
+        ],
         "errors": [
             {"sample_id": result["sample_id"], "error": result["error"]} for result in errors
         ],
@@ -630,6 +724,8 @@ async def run_level(
                 "tpot_ms": (r["tpot"] or 0) * 1000 if r["tpot"] else None,
                 "latency_ms": r["total_latency"] * 1000,
                 "finish_reason": r["finish_reason"],
+                "attempts": r["attempts"],
+                "retries": r["retries"],
                 "arrival_offset_sec": r["arrival_offset_sec"],
                 "dispatch_offset_sec": r["dispatch_offset_sec"],
                 "dispatch_lag_sec": r["dispatch_lag_sec"],
@@ -657,32 +753,29 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     if len(samples) != args.num_samples:
         raise ValueError(f"expected {args.num_samples} samples, loaded {len(samples)}")
     tokenizer = _load_tokenizer(args.tokenizer_path)
-    levels = [await run_level(args, samples, tokenizer, rate) for rate in args.request_rates]
-    valid = all(level["valid"] for level in levels)
-    best = max(levels, key=lambda level: level["throughput_tok_per_sec"] or 0)
+    level = await run_level(args, samples, tokenizer, args.request_rate)
+    valid = level["valid"]
     report = {
-        "valid": valid,
-        "max_throughput_tok_per_sec": best["throughput_tok_per_sec"] if valid else None,
+        **level,
+        "max_throughput_tok_per_sec": level["throughput_tok_per_sec"] if valid else None,
         "load_model": "open-loop-poisson",
-        "best_request_rate": best["request_rate"] if valid else None,
-        "request_rates": args.request_rates,
-        "rate_results": levels,
     }
     if args.output_json:
         Path(args.output_json).write_text(json.dumps(report, indent=2, allow_nan=False))
     if not valid:
-        raise RuntimeError("open-loop sweep failed: every arrival must complete without client lag")
+        raise RuntimeError(
+            "5 RPS benchmark failed: every arrival must complete within retry deadline and without client lag"
+        )
     print(
         f"Primary metric: max_throughput_tok_per_sec = {report['max_throughput_tok_per_sec']:.2f}"
     )
-    print(f"Best request rate: {report['best_request_rate']}")
     return report
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Peak aggregate code-edit throughput under open-loop request-rate load. "
+            "Aggregate code-edit throughput under one 5 RPS open-loop load. "
             "Only original prompts are sent, with no out-of-band draft field."
         ),
     )
@@ -730,17 +823,17 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
-        "--request-rates",
+        "--request-rate",
         type=float,
-        nargs="+",
-        default=[0.25, 1, 4, 16],
-        help="Poisson arrival rates in req/s; no client concurrency limit.",
+        choices=[5.0],
+        default=5.0,
+        help="Fixed mean Poisson arrival rate: 5 req/s; no concurrency limit or sweep.",
     )
     parser.add_argument(
         "--request-timeout",
         type=float,
         default=3600,
-        help="Per-request timeout including server-side queuing.",
+        help="Total logical-request deadline including queuing, failed attempts and backoff.",
     )
     parser.add_argument(
         "--max-dispatch-lag",
@@ -773,10 +866,6 @@ def main() -> None:
         args.num_samples = args.num_requests
     if args.warmup < 0 or args.num_samples <= args.warmup:
         parser.error("require 0 <= warmup < num_samples")
-    if len(args.request_rates) < 2 or len(set(args.request_rates)) != len(args.request_rates):
-        parser.error("require at least two distinct request rates")
-    if any(not math.isfinite(rate) or rate <= 0 for rate in args.request_rates):
-        parser.error("request rates must be finite and positive")
     if args.num_samples - args.warmup < 2:
         parser.error("require at least two measured requests")
     if any(

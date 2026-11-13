@@ -9,7 +9,7 @@ command = ["python", "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/la
 timeout_seconds = 1800
 
 [benchmark]
-command = ["python", "${PROJECT_ROOT}/.vibesys/tasks/default/managed_evaluation.py", "--", "uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/benchmark.py", "--tokenizer-path", "/model", "--seed", "42", "--num-samples", "64", "--warmup", "3", "--max-tokens", "512", "--request-rates", "0.25", "1", "4", "16", "--request-timeout", "3600", "--max-dispatch-lag", "1"]
+command = ["python", "${PROJECT_ROOT}/.vibesys/tasks/default/managed_evaluation.py", "--", "uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/benchmark.py", "--tokenizer-path", "/model", "--seed", "42", "--num-samples", "64", "--warmup", "3", "--max-tokens", "512", "--request-rate", "5", "--request-timeout", "3600", "--max-dispatch-lag", "1"]
 timeout_seconds = 10800
 
 [benchmark.result]
