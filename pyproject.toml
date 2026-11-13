@@ -466,7 +466,7 @@ exclude = ["exp_env/**", "sdk/vs-evaluator"]
 members = ["sdk/*", "libs/*"]
 
 [tool.uv.sources]
-agentshim = { path = "/home/v-yuzwang/ms-task/projects/kb/src/agentshim" }
+agentshim = { path = "/home/v-yuzwang/ms-task/projects/kb/src/agentshim-usage-fix" }
 vs-bench = { workspace = true }
 vs-dst = { workspace = true }
 vs-core = { workspace = true }

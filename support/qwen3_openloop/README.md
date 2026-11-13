@@ -27,6 +27,11 @@ native CLI 保留在 `/usr/local/bin/copilot`，不会被后续框架 feature �
 reasoning 属于输出，分别分列而不重复相加。原始会话用量保存在容器 HOME 的
 `.copilot-usage/`，中性逐 turn 用量保存在 framework core events。
 此统计覆盖 CLI 中所有模型请求（包括内置子 agent），不把 per-agent 和 total 再相加。
+使用 agentshim `0.18.4+vibesys4`（`c4679c4`）或后续修复版本：
+usage-file 的 `outputTokens` 已包含 reasoning，而现有中性事件解析会将 disjoint
+reasoning 加回；bridge 必须先减去这个子集，避免重复计数。
+v3 旧实验保留原始事件，并在其独立 operator 投影中减去一次额外 fold，
+不能将旧框架 output 总数直接冒充官方 CLI 输出总数。
 
 ## 外层监控
 

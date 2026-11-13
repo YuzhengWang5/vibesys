@@ -125,11 +125,14 @@ translation; `[thinking].level = "high"` therefore reaches the CLI.
 
 For the restored 1108 experiment, the unavailable machine-local dependency was
 replaced with upstream v0.18.3 plus typed Copilot tool exclusion and
-reasoning-effort translation, versioned `0.18.4+vibesys3`. The local source is
-`/home/v-yuzwang/ms-task/projects/kb/src/agentshim`, checkpoint
-`8f7b7c89ac3064bb761033b4856a81db77694574`. It also provides an opt-in
+reasoning-effort translation, versioned `0.18.4+vibesys4`. The local source is
+`/home/v-yuzwang/ms-task/projects/kb/src/agentshim-usage-fix`, checkpoint
+`c4679c4fd53b984effa1b6bd4fa31f7af1e4f7c2`. It also provides an opt-in
 operator CLI bridge for official cumulative usage-file counters, including
 exact resumed-turn differences (see `support/qwen3_openloop/README.md`).
+The usage file counts output inclusive of reasoning, unlike the disjoint
+`assistant.usage` fold; v4 subtracts the subset before emitting that frame.
+The isolated dependency worktree avoids hot-editing ongoing v3 experiments.
 This is a compatibility rebuild,
 not the original dependency commit; experiment records must pin it separately.
 
