@@ -7,4 +7,4 @@ RUN mkdir -p /opt/copilot-bin \
     && chmod 755 /opt/copilot-bin/copilot
 ENV PATH="/opt/copilot-bin:${PATH}"
 ENV COPILOT_NATIVE_BINARY="/usr/local/bin/copilot"
-USER agent
+USER root

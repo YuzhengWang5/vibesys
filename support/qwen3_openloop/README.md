@@ -18,6 +18,9 @@ agentshim 的 `providers/copilot/usage_cli.py` 调用官方 `--usage-output-file
 native CLI 保留在 `/usr/local/bin/copilot`，不会被后续框架 feature 安装覆盖；
 构建上下文须复制所记录 agentshim checkpoint 的 bridge 文件为
 `copilot_usage.py`。不要直接使用未钉住的 latest CLI/镜像。
+`BASE_IMAGE` 必须是 task/backend 的原始基础镜像，不是已安装 agent feature 的
+成品镜像：框架还会安装 agent feature，后者会重新创建其 Python venv。
+本层保持 root，最终 agent feature 负责创建及切换非 root 用户。
 
 该文件中的每个 model usage 是会话累计值；bridge 持久化上次累计值并在 resume 时
 做差。缺失前值、缺字段或计数倒退显式失败，不猜零。缓存属于输入、
