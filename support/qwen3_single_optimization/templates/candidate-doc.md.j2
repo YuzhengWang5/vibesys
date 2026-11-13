@@ -6,7 +6,8 @@ checkpoint 独立导出，不含旧实验实现或 Git 历史。
 
 服务契约：前台 `run_server.sh --model-dir /model --port PORT`；
 `/health` 在真实模型就绪后返回 200；实现 OpenAI 风格流式 `/v1/completions`。
-工作负载固定为 CodeEditorBench code-debug、并发度 2、4、8、16；
+工作负载固定为 CodeEditorBench code-debug、Poisson open-loop 到达率
+0.25、1、4、16 req/s；客户端不限制并发，并发及 batch 由引擎决定。
 保持 BF16、greedy、禁用 thinking 和模型 token 计数。请求只发送原 prompt，
 n-gram 草稿只从本请求原 prompt 查找；允许范围完全由本次 OBJECTIVE 决定。
 
@@ -16,8 +17,9 @@ n-gram 草稿只从本请求原 prompt 查找；允许范围完全由本次 OBJE
 # 固定吞吐评测
 
 `benchmark.py` 是不变的可信评测，主指标为 `max_throughput_tok_per_sec`：
-固定并发度 2、4、8、16 中总输出 token / 稳态墙钟秒的最大值。
-保持 CodeEditorBench code-debug、seed=42、每点 50 samples、独立 warmup=3、
+Poisson open-loop 请求率 0.25、1、4、16 req/s 中总输出 token /
+含排队及排空墙钟秒的最大值；不设置客户端并发上限。
+保持 CodeEditorBench code-debug、seed=42、每点 64 samples、独立 warmup=3、
 max_tokens=512 与流式模型 token 统计。任何请求错误或空输出使整次评测失败。
 仅发送原 prompt，不额外提供草稿或答案。
 只执行 OBJECTIVE 指定的唯一优化；先可信测量 eager BF16 AR 基线，再单因素 A/B。

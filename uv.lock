@@ -40,7 +40,7 @@ members = [
 
 [[package]]
 name = "agentshim"
-version = "0.18.4+vibesys2"
+version = "0.18.4+vibesys3"
 source = { directory = "/home/v-yuzwang/ms-task/projects/kb/src/agentshim" }
 
 [package.metadata]

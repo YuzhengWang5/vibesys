@@ -125,9 +125,12 @@ translation; `[thinking].level = "high"` therefore reaches the CLI.
 
 For the restored 1108 experiment, the unavailable machine-local dependency was
 replaced with upstream v0.18.3 plus typed Copilot tool exclusion and
-reasoning-effort translation, versioned `0.18.4+vibesys2`. The local source is
+reasoning-effort translation, versioned `0.18.4+vibesys3`. The local source is
 `/home/v-yuzwang/ms-task/projects/kb/src/agentshim`, checkpoint
-`7d8625f0b662b1df36d643d5d65f9174eeedad1c`. This is a compatibility rebuild,
+`8f7b7c89ac3064bb761033b4856a81db77694574`. It also provides an opt-in
+operator CLI bridge for official cumulative usage-file counters, including
+exact resumed-turn differences (see `support/qwen3_openloop/README.md`).
+This is a compatibility rebuild,
 not the original dependency commit; experiment records must pin it separately.
 
 Every Copilot turn excludes `session_store_sql`, `store_memory`, and

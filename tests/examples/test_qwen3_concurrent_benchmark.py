@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
-import itertools
+import asyncio
 import json
 import runpy
+from itertools import pairwise
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
@@ -14,6 +16,9 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_sim.api import yield_now
+
+if TYPE_CHECKING:
+    from vs_sim.api.testing import Sim
 
 BENCHMARK = Path(
     "examples/model-serving/qwen3-32b-code-edit/.vibesys/tasks/default/benchmark/benchmark.py"
@@ -51,8 +56,7 @@ class CompletionTransport(httpx.AsyncBaseTransport):
         )
 
 
-@pytest.mark.parametrize("concurrency", [2, 4])
-async def test_requests_overlap_without_out_of_band_drafts(concurrency: int) -> None:
+async def test_requests_overlap_without_out_of_band_drafts(sim: Sim) -> None:
     benchmark = runpy.run_path(str(BENCHMARK))
     samples = [
         {
@@ -76,18 +80,19 @@ async def test_requests_overlap_without_out_of_band_drafts(concurrency: int) -> 
         print_stream=False,
         seed=42,
         tokenizer_path="unused",
+        request_timeout=3600,
+        max_dispatch_lag=1,
     )
     transport = CompletionTransport()
-    ticks = itertools.count()
     report = await benchmark["run_level"](
         args,
         samples,
         CharacterTokenizer(),
-        concurrency,
+        100000,
         transport=transport,
-        clock=lambda: float(next(ticks)),
+        clock=sim.clock.now,
+        sleep=sim.clock.sleep,
     )
-    assert transport.peak == concurrency
     assert len(transport.bodies) == 7
     for sample, body in zip(samples, transport.bodies, strict=True):
         assert set(body) == {
@@ -104,6 +109,54 @@ async def test_requests_overlap_without_out_of_band_drafts(concurrency: int) -> 
     assert report["total_output_tokens"] == 20
     assert report["throughput_tok_per_sec"] == 20 / report["actual_duration_sec"]
     assert report["median_chunks"] == 1
+    assert report["request_rate"] == 100000
+    assert report["arrival_process"] == "poisson"
+
+
+async def test_slow_responses_do_not_throttle_arrivals(sim: Sim) -> None:
+    benchmark = runpy.run_path(str(BENCHMARK))
+    count = 40
+    offsets = benchmark["arrival_offsets"](count, 16, 42)
+    started: list[float] = []
+    completed: list[float] = []
+    release = asyncio.Event()
+
+    async def send(_index: int) -> dict:
+        started.append(sim.clock.now())
+        if len(started) == count:
+            release.set()
+        await release.wait()
+        await yield_now()
+        completed.append(sim.clock.now())
+        return {"error": None, "output_tokens": 5}
+
+    results, duration, load = await benchmark["dispatch_open_loop"](
+        count,
+        16,
+        42,
+        send,
+        clock=sim.clock.now,
+        sleep=sim.clock.sleep,
+    )
+    assert len(results) == count
+    assert [value - started[0] for value in started] == pytest.approx(offsets)
+    assert min(completed) >= started[-1]
+    assert load["observed_peak_in_flight"] == count
+    assert load["max_dispatch_lag_sec"] == pytest.approx(0)
+    assert duration >= offsets[-1]
+
+
+@given(
+    rate=st.floats(min_value=0.01, max_value=1000, allow_nan=False),
+    count=st.integers(min_value=2, max_value=100),
+)
+def test_seeded_arrivals_scale_with_rate(rate: float, count: int) -> None:
+    benchmark = runpy.run_path(str(BENCHMARK))
+    offsets = benchmark["arrival_offsets"](count, rate, 42)
+    faster = benchmark["arrival_offsets"](count, rate * 2, 42)
+    assert offsets[0] == 0
+    assert all(a < b for a, b in pairwise(offsets))
+    assert faster == pytest.approx([offset / 2 for offset in offsets])
 
 
 @given(

@@ -11,9 +11,10 @@ benchmark 并保留其不可变 revision、日志与测量证据；然后仅改�
 缩减评测、复用历史答案或绕过门禁。预算内先提交基线正式评测，再提交优化候选正式评测；
 agent 自测结果不能代替框架可信测量。最终记录 A/B 两个 revision 与可信 evidence 标识。
 
-目标模型为 Qwen/Qwen3-32B，权重挂载于 `/model`。固定并发 sweep 为 2、4、8、16，
+目标模型为 Qwen/Qwen3-32B，权重挂载于 `/model`。使用 Poisson open-loop
+请求率 0.25、1、4、16 req/s，不设客户端并发上限；并发和 batch 由引擎决定。
 优化 `.vibesys/tasks/default/benchmark/benchmark.py` 的 `max_throughput_tok_per_sec`，
-即各并发点总输出 token / 稳态墙钟秒的最大值，不是单请求速度。
+即各请求率点总输出 token / 含排队及排空墙钟秒的最大值，不是单请求速度。
 请求只发送原 prompt，不提供独立草稿或答案。n-gram 草稿只能从本请求原 prompt
 查找并经 target 验证，禁止读取 gold、参考观测或历史请求答案。
 服务实现 `run_server.sh --model-dir /model --port PORT`，保持前台运行，

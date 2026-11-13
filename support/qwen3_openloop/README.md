@@ -1,0 +1,50 @@
+# Open-loop 有序优化实验
+
+默认 code-edit 输入采用独立 Poisson 到达负载，不再固定客户端并发。
+请求率 0.25/1/4/16 req/s，每点相同 64 样本、3 warmup、512 token 预算，
+完整排空并保留错误、客户端派发延误与实际在途数。详见示例 benchmark README。
+
+优化序列为 FlashInfer → 算子融合 → continuous batching → 当前原 prompt
+n-gram 投机解码 → CUDA Graph。outerloop 为 agent，最多 10 轮，
+每轮 innerloop 五次 implementer 机会；同一优化可跨轮，不能叠加或跳项。
+BF16 和固定 0.2 teacher-forced gate 不变。
+
+## Token 统计
+
+旧 Copilot JSON 事件通常没有 token 数，不能把零占位当作免费执行。
+agentshim 的 `providers/copilot/usage_cli.py` 调用官方 `--usage-output-file`，
+将真实计数转成现有 `assistant.usage` 事件，框架本身无需新增 provider 解析。
+`Dockerfile` 将 bridge 安装在独立 operator 镜像的 PATH 首位，
+native CLI 保留在 `/usr/local/bin/copilot`，不会被后续框架 feature 安装覆盖；
+构建上下文须复制所记录 agentshim checkpoint 的 bridge 文件为
+`copilot_usage.py`。不要直接使用未钉住的 latest CLI/镜像。
+
+该文件中的每个 model usage 是会话累计值；bridge 持久化上次累计值并在 resume 时
+做差。缺失前值、缺字段或计数倒退显式失败，不猜零。缓存属于输入、
+reasoning 属于输出，分别分列而不重复相加。原始会话用量保存在容器 HOME 的
+`.copilot-usage/`，中性逐 turn 用量保存在 framework core events。
+此统计覆盖 CLI 中所有模型请求（包括内置子 agent），不把 per-agent 和 total 再相加。
+
+## 外层监控
+
+```bash
+PYTHONPATH="$PWD/support" .venv/bin/python -m qwen3_openloop.supervise \
+  --run /absolute/experiment/run --run-id UUID
+```
+
+先准备独立项目、模型只读挂载和 `scripts/launch.sh`；启动脚本必须验证干净
+tested_commit、agentshim pin、GPU 空闲，显式设置设备、模型与轮次参数。
+监控器拥有子进程，每 30 秒从公共 Project API 打开的 core log 投影：
+
+- `logs/token-costs.json`：每项优化的累计 token、每角色/调用明细、重试、
+  缺失统计及轮次；规划调用在 design 确定 hypothesis 后回填。
+- `logs/monitor-status.json`：当前优化、最后 gate、已完成轮次、事件停滞时间。
+- `logs/alerts.jsonl`：失败 gate / agent 调用，立即记录；候选问题先由该轮
+  有限 innerloop 修复，不能绕过准确性或更改可信负载。
+- `logs/monitor-exit.json`：真实退出码。统计缺失、超过十轮或超出最长评测
+  仍无事件会请求合作停止；监控器崩溃也会收回自己启动的框架进程。
+
+所有假设使用 OBJECTIVE 规定的稳定阶段前缀；未关联的规划成本单列，
+未知用量不当作零。重试与失败成本也保留。基础设施故障由 operator 查看告警、
+修复并提交 main，再用新的 run 和 tested_commit 重试，不在运行中热改源码。
+本目录是外层实验工具，不修改框架默认预算，也不把人工停止误称自然成功。

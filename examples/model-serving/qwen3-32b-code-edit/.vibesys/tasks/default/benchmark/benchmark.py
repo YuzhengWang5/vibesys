@@ -1,7 +1,7 @@
-"""Measure peak aggregate code-edit throughput over a fixed concurrency sweep.
+"""Measure aggregate code-edit capacity under independent open-loop arrivals.
 
 Only the original chat-templated prompt is sent: no out-of-band draft or answer.
-Each level uses the same CodeEditorBench samples and separate untimed warmup.
+Each request-rate level uses the same samples and separate untimed warmup.
 The score is max(sum(retokenized output tokens) / measured wall seconds) over
 fully successful levels, never median per-request speed or SSE chunk count.
 """
@@ -17,7 +17,7 @@ import random
 import statistics
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -178,6 +178,7 @@ async def send_request(
     print_stream: bool = False,
     sample_id: str | None = None,
     clock: Callable[[], float] = time.perf_counter,
+    request_timeout: float = 3600.0,
 ) -> dict:
     """Send one code-edit completion request and measure latency."""
     body: dict[str, Any] = {
@@ -195,7 +196,7 @@ async def send_request(
         sys.stderr.write(f"\n===== >>> PROMPT {header} =====\n{prompt}\n")
         sys.stderr.flush()
 
-    r = await stream_sse(client, url, body, timeout=600.0, clock=clock)
+    r = await stream_sse(client, url, body, timeout=request_timeout, clock=clock)
 
     if print_stream:
         sys.stderr.write(f"===== <<< OUTPUT =====\n{r.text}\n===== <<< END =====\n")
@@ -322,71 +323,136 @@ def _fmt_stats(values: list[float], unit: str = "ms", multiplier: float = 1000.0
 # ---------------------------------------------------------------------------
 
 
-def summarize_capacity(results: list[dict], duration: float, concurrency: int) -> dict:
+def summarize_capacity(results: list[dict], duration: float, request_rate: float) -> dict:
     """Reject partial/empty workloads instead of scoring dropped requests."""
     if not math.isfinite(duration) or duration <= 0:
         raise ValueError("measured duration must be finite and positive")
     failures = [
         result for result in results if result["error"] is not None or result["output_tokens"] <= 0
     ]
-    valid = len(results) >= concurrency >= 2 and not failures
+    valid = len(results) >= 2 and not failures
     tokens = sum(result["output_tokens"] for result in results)
     return {
-        "concurrency": concurrency,
+        "request_rate": request_rate,
         "valid": valid,
         "total_output_tokens": tokens,
         "throughput_tok_per_sec": tokens / duration if valid else None,
     }
 
 
+def arrival_offsets(count: int, rate: float, seed: int) -> list[float]:
+    """Reproducible Poisson deadlines, independent of responses and send overhead."""
+    if count < 2 or not math.isfinite(rate) or rate <= 0:
+        raise ValueError("require at least two arrivals and a finite positive request rate")
+    rng = random.Random(seed)
+    offsets = [0.0]
+    for _ in range(count - 1):
+        offsets.append(offsets[-1] + rng.expovariate(rate))
+    return offsets
+
+
+async def dispatch_open_loop(
+    count: int,
+    rate: float,
+    seed: int,
+    send: Callable[[int], Awaitable[dict]],
+    *,
+    clock: Callable[[], float] = time.perf_counter,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> tuple[list[dict], float, dict]:
+    """Admit all arrivals on absolute deadlines, without client backpressure."""
+    offsets = arrival_offsets(count, rate, seed)
+    active = peak = 0
+    start = clock()
+
+    async def one(index: int, offset: float) -> dict:
+        nonlocal active, peak
+        await sleep(max(0.0, start + offset - clock()))
+        dispatch = clock()
+        active += 1
+        peak = max(peak, active)
+        try:
+            result = await send(index)
+        finally:
+            active -= 1
+        result["arrival_offset_sec"] = offset
+        result["dispatch_offset_sec"] = dispatch - start
+        result["dispatch_lag_sec"] = max(0.0, dispatch - start - offset)
+        result["arrival_latency_sec"] = clock() - start - offset
+        return result
+
+    async with asyncio.TaskGroup() as group:
+        tasks = [group.create_task(one(index, offset)) for index, offset in enumerate(offsets)]
+    results = [task.result() for task in tasks]
+    duration = clock() - start
+    return (
+        results,
+        duration,
+        {
+            "arrival_process": "poisson",
+            "scheduled_arrival_span_sec": offsets[-1],
+            "observed_peak_in_flight": peak,
+            "max_dispatch_lag_sec": max(result["dispatch_lag_sec"] for result in results),
+        },
+    )
+
+
 async def run_level(
     args: argparse.Namespace,
     samples: list[dict],
     tokenizer,
-    concurrency: int,
+    request_rate: float,
     *,
     transport: httpx.AsyncBaseTransport | None = None,
     clock: Callable[[], float] = time.perf_counter,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> dict:
     url = args.url.rstrip("/") + args.endpoint
     languages = [s.strip() for s in args.languages.split(",") if s.strip()]
     prompts = [_build_prompt(tokenizer, sample) for sample in samples]
-    print(f"[bench] concurrency={concurrency}: {len(samples)} requests to {url}", file=sys.stderr)
+    print(
+        f"[bench] open-loop rate={request_rate} req/s: {len(samples)} requests to {url}",
+        file=sys.stderr,
+    )
 
     results: list[dict] = []
-    limits = httpx.Limits(max_connections=concurrency, max_keepalive_connections=concurrency)
+    limits = httpx.Limits(max_connections=None, max_keepalive_connections=None)
     async with httpx.AsyncClient(limits=limits, transport=transport) as client:
-        semaphore = asyncio.Semaphore(concurrency)
 
         async def one(idx: int) -> dict:
             sample = samples[idx]
-            async with semaphore:
-                result = await send_request(
-                    client,
-                    url,
-                    prompts[idx],
-                    max_tokens=args.max_tokens,
-                    temperature=args.temperature,
-                    tokenizer=tokenizer,
-                    model_name=args.model,
-                    print_stream=args.print_stream,
-                    sample_id=sample["unique_id"],
-                    clock=clock,
-                )
+            result = await send_request(
+                client,
+                url,
+                prompts[idx],
+                max_tokens=args.max_tokens,
+                temperature=args.temperature,
+                tokenizer=tokenizer,
+                model_name=args.model,
+                print_stream=args.print_stream,
+                sample_id=sample["unique_id"],
+                clock=clock,
+                request_timeout=args.request_timeout,
+            )
             result["sample_id"] = sample["unique_id"]
             result["language"] = sample["language"]
             result["bug_type"] = sample["bug_type"]
             result["is_warmup"] = idx < args.warmup
             return result
 
-        results.extend(await asyncio.gather(*(one(idx) for idx in range(args.warmup))))
+        for idx in range(args.warmup):
+            results.append(await one(idx))
         if any(result["error"] is not None for result in results):
-            raise RuntimeError(f"concurrency={concurrency}: warmup failed: {results}")
-        t_start = clock()
-        results.extend(
-            await asyncio.gather(*(one(idx) for idx in range(args.warmup, len(samples))))
+            raise RuntimeError(f"rate={request_rate}: warmup failed: {results}")
+        measured, wall_clock, load = await dispatch_open_loop(
+            len(samples) - args.warmup,
+            request_rate,
+            args.seed,
+            lambda index: one(index + args.warmup),
+            clock=clock,
+            sleep=sleep,
         )
-        wall_clock = clock() - t_start
+        results.extend(measured)
 
         for idx, (sample, result) in enumerate(zip(samples, results, strict=True)):
             if result["error"] is None:
@@ -469,7 +535,7 @@ async def run_level(
 
     print()
     print("=" * 60)
-    print(f"  Code-edit throughput benchmark: concurrency={concurrency}")
+    print(f"  Code-edit open-loop benchmark: request_rate={request_rate}")
     print("=" * 60)
     print(f"Backend URL:       {url}")
     print(f"Samples (sent):    {len(results)} (warmup discarded: {args.warmup})")
@@ -507,7 +573,10 @@ async def run_level(
         else None
     )
     print()
-    capacity = summarize_capacity(steady, wall_clock, concurrency)
+    capacity = summarize_capacity(steady, wall_clock, request_rate)
+    if load["max_dispatch_lag_sec"] > args.max_dispatch_lag:
+        capacity["valid"] = False
+        capacity["throughput_tok_per_sec"] = None
     print(f"Aggregate throughput: {capacity['throughput_tok_per_sec']} tok/s")
     print(f"Completed: {len(successes)}/{len(steady)} requests")
 
@@ -518,6 +587,7 @@ async def run_level(
     )
     result_dict: dict[str, Any] = {
         **capacity,
+        **load,
         "config": {
             "url": url,
             "languages": languages,
@@ -560,6 +630,10 @@ async def run_level(
                 "tpot_ms": (r["tpot"] or 0) * 1000 if r["tpot"] else None,
                 "latency_ms": r["total_latency"] * 1000,
                 "finish_reason": r["finish_reason"],
+                "arrival_offset_sec": r["arrival_offset_sec"],
+                "dispatch_offset_sec": r["dispatch_offset_sec"],
+                "dispatch_lag_sec": r["dispatch_lag_sec"],
+                "arrival_latency_sec": r["arrival_latency_sec"],
                 "alignment": r["alignment"],
                 "quality": r["quality"],
             }
@@ -583,34 +657,32 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     if len(samples) != args.num_samples:
         raise ValueError(f"expected {args.num_samples} samples, loaded {len(samples)}")
     tokenizer = _load_tokenizer(args.tokenizer_path)
-    levels = [
-        await run_level(args, samples, tokenizer, concurrency)
-        for concurrency in args.concurrency_levels
-    ]
+    levels = [await run_level(args, samples, tokenizer, rate) for rate in args.request_rates]
     valid = all(level["valid"] for level in levels)
     best = max(levels, key=lambda level: level["throughput_tok_per_sec"] or 0)
     report = {
         "valid": valid,
         "max_throughput_tok_per_sec": best["throughput_tok_per_sec"] if valid else None,
-        "best_concurrency": best["concurrency"] if valid else None,
-        "concurrency_levels": args.concurrency_levels,
-        "concurrency_results": levels,
+        "load_model": "open-loop-poisson",
+        "best_request_rate": best["request_rate"] if valid else None,
+        "request_rates": args.request_rates,
+        "rate_results": levels,
     }
     if args.output_json:
         Path(args.output_json).write_text(json.dumps(report, indent=2, allow_nan=False))
     if not valid:
-        raise RuntimeError("concurrency sweep failed: all levels must complete every request")
+        raise RuntimeError("open-loop sweep failed: every arrival must complete without client lag")
     print(
         f"Primary metric: max_throughput_tok_per_sec = {report['max_throughput_tok_per_sec']:.2f}"
     )
-    print(f"Best concurrency: {report['best_concurrency']}")
+    print(f"Best request rate: {report['best_request_rate']}")
     return report
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Peak aggregate code-edit throughput across multiple concurrency levels. "
+            "Peak aggregate code-edit throughput under open-loop request-rate load. "
             "Only original prompts are sent, with no out-of-band draft field."
         ),
     )
@@ -658,11 +730,23 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
-        "--concurrency-levels",
-        type=int,
+        "--request-rates",
+        type=float,
         nargs="+",
-        default=[2, 4, 8, 16],
-        help="Fixed multi-request concurrency sweep (default: 2 4 8 16).",
+        default=[0.25, 1, 4, 16],
+        help="Poisson arrival rates in req/s; no client concurrency limit.",
+    )
+    parser.add_argument(
+        "--request-timeout",
+        type=float,
+        default=3600,
+        help="Per-request timeout including server-side queuing.",
+    )
+    parser.add_argument(
+        "--max-dispatch-lag",
+        type=float,
+        default=1.0,
+        help="Fail if the client misses any arrival deadline by more seconds.",
     )
     parser.add_argument(
         "--print-stream",
@@ -673,10 +757,9 @@ def main() -> None:
         "--output-json", type=str, default=None, help="Optional path to write structured results."
     )
     # Back-compat no-ops so the orchestrator's sanity invocation accepts these.
-    parser.add_argument("--rate", type=float, default=None, help="Ignored — closed-loop sweep.")
     parser.add_argument("--num-requests", type=int, default=None, help="Alias for --num-samples.")
     parser.add_argument(
-        "--duration", type=float, default=None, help="Ignored — runs to --num-samples."
+        "--duration", type=float, default=None, help="Compatibility no-op; drains every arrival."
     )
     parser.add_argument(
         "--prompt-len", type=int, default=None, help="Ignored — prompts come from the dataset."
@@ -690,12 +773,17 @@ def main() -> None:
         args.num_samples = args.num_requests
     if args.warmup < 0 or args.num_samples <= args.warmup:
         parser.error("require 0 <= warmup < num_samples")
-    if len(set(args.concurrency_levels)) != len(args.concurrency_levels):
-        parser.error("concurrency levels must be distinct")
-    if len(args.concurrency_levels) < 2 or min(args.concurrency_levels) < 2:
-        parser.error("require at least two distinct concurrency levels, all >= 2")
-    if max(args.concurrency_levels) > args.num_samples - args.warmup:
-        parser.error("steady sample count must cover the largest concurrency level")
+    if len(args.request_rates) < 2 or len(set(args.request_rates)) != len(args.request_rates):
+        parser.error("require at least two distinct request rates")
+    if any(not math.isfinite(rate) or rate <= 0 for rate in args.request_rates):
+        parser.error("request rates must be finite and positive")
+    if args.num_samples - args.warmup < 2:
+        parser.error("require at least two measured requests")
+    if any(
+        not math.isfinite(value) or value <= 0
+        for value in (args.request_timeout, args.max_dispatch_lag)
+    ):
+        parser.error("request timeout and dispatch lag must be finite and positive")
     asyncio.run(run_benchmark(args))
 
 
