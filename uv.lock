@@ -40,8 +40,8 @@ members = [
 
 [[package]]
 name = "agentshim"
-version = "0.18.4+vibesys3"
-source = { directory = "/home/v-yuzwang/ms-task/projects/kb/src/agentshim" }
+version = "0.18.4+vibesys4"
+source = { directory = "/home/v-yuzwang/ms-task/projects/kb/src/agentshim-usage-fix" }
 
 [package.metadata]
 requires-dist = [
@@ -2959,7 +2959,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", directory = "/home/v-yuzwang/ms-task/projects/kb/src/agentshim" },
+    { name = "agentshim", directory = "/home/v-yuzwang/ms-task/projects/kb/src/agentshim-usage-fix" },
     { name = "cbor2", specifier = "<6" },
     { name = "cryptography", specifier = "<50" },
     { name = "huggingface-hub" },
@@ -3019,7 +3019,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", directory = "/home/v-yuzwang/ms-task/projects/kb/src/agentshim" },
+    { name = "agentshim", directory = "/home/v-yuzwang/ms-task/projects/kb/src/agentshim-usage-fix" },
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-faults", editable = "libs/vs-faults" },
