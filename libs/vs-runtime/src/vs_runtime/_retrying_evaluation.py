@@ -10,7 +10,8 @@ keeps only a hard cap (`MAX_SUBMISSIONS_PER_MEASUREMENT`) that no declaration ca
 measurement runs under the inner handle `attempt_handle(handle_id, n)`; the wrapper
 records the request and the current try durably (an `EvaluationStateNamespace`), so a
 restarted host resumes the retrying instead of reporting the failure it was about to
-retry.
+retry. A recorded first try is also restored when the executor reports it unsubmitted;
+unknown execution state is not a reason to submit again.
 """
 
 from __future__ import annotations
@@ -193,8 +194,8 @@ class RetryingEvaluationExecutor:
             return await self._inner.poll(handle_id)
         current = attempt_handle(handle_id, tries.attempt)
         polled = await self._inner.poll(current)
-        if polled.phase is PollPhase.UNSUBMITTED and tries.attempt > 1:
-            # The next try was recorded and the host stopped before starting it.
+        if polled.phase is PollPhase.UNSUBMITTED:
+            # A recorded try, including the first, may be absent from a restarted executor.
             await self._submit_try(handle_id, tries)
             return ExecutorPoll(phase=PollPhase.QUEUED, attempt=polled.attempt)
         if polled.terminal is None:

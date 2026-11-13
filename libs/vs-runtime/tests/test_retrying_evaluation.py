@@ -215,6 +215,52 @@ def test_a_run_of_infrastructure_failures_uses_exactly_the_declared_bound(
 
 
 @given(retries=_RETRIES)
+@pytest.mark.parametrize("submitted_before_restart", [False, True])
+def test_the_first_try_is_restored_when_the_restarted_executor_holds_no_record(
+    retries: EvaluationRetries, *, submitted_before_restart: bool
+) -> None:
+    namespace = InMemoryEvaluationNamespace()
+    initial = ScriptedExecutor((Outcome.SUCCEEDED,), lose_next_submit=not submitted_before_restart)
+    first = RetryingEvaluationExecutor(initial, retries, namespace)
+    run_virtual(VirtualClock(), first.submit(_request(), handle_id="h"))
+    inner = ScriptedExecutor((Outcome.SUCCEEDED,))
+    restarted = RetryingEvaluationExecutor(inner, retries, namespace)
+
+    async def story() -> None:
+        assert await restarted.inspect_only("h") is None
+        assert not inner.submitted
+        assert (await restarted.poll("h")).phase is PollPhase.QUEUED
+        assert await _measure_resumed(restarted) == _terminal(Outcome.SUCCEEDED)
+        assert inner.submitted == ["h"]
+
+    run_virtual(VirtualClock(), story())
+
+
+@pytest.mark.parametrize(
+    ("recorded_request", "phase"),
+    [(False, PollPhase.UNSUBMITTED), (False, PollPhase.UNKNOWN), (True, PollPhase.UNKNOWN)],
+)
+def test_resumption_requires_a_durable_request_and_an_unsubmitted_observation(
+    *, recorded_request: bool, phase: PollPhase
+) -> None:
+    class UncertainExecutor(ScriptedExecutor):
+        async def poll(self, handle_id: str) -> ExecutorPoll:
+            del handle_id
+            return ExecutorPoll(phase=phase)
+
+    retries = EvaluationRetries(infrastructure_attempts=2, ambiguous_attempts=1)
+    namespace = InMemoryEvaluationNamespace()
+    if recorded_request:
+        initial = ScriptedExecutor((Outcome.SUCCEEDED,), lose_next_submit=True)
+        first = RetryingEvaluationExecutor(initial, retries, namespace)
+        run_virtual(VirtualClock(), first.submit(_request(), handle_id="h"))
+    inner = UncertainExecutor((Outcome.SUCCEEDED,))
+    restarted = RetryingEvaluationExecutor(inner, retries, namespace)
+    assert run_virtual(VirtualClock(), restarted.poll("h")).phase is phase
+    assert not inner.submitted
+
+
+@given(retries=_RETRIES)
 def test_a_retry_started_before_a_restart_is_not_lost(retries: EvaluationRetries) -> None:
     """The next try is recorded before it starts, so a restarted host starts it, not reports."""
     namespace = InMemoryEvaluationNamespace()
