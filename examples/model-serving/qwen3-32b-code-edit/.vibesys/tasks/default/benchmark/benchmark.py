@@ -714,7 +714,7 @@ def main() -> None:
         help="Skip rows whose buggy program is longer than this (default: 4000).",
     )
     parser.add_argument(
-        "--num-samples", type=int, default=50, help="Total samples to send (default: 50)."
+        "--num-samples", type=int, default=64, help="Total samples to send (default: 64)."
     )
     parser.add_argument(
         "--warmup",
