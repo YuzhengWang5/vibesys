@@ -123,6 +123,16 @@ use `--allow-unvetted-model`. This is explicit opt-in, not a fallback to another
 provider. The pinned experiment dependency adds Copilot's `--reasoning-effort`
 translation; `[thinking].level = "high"` therefore reaches the CLI.
 
+For the restored 1108 experiment, the unavailable machine-local dependency was
+replaced with upstream v0.18.3 plus typed Copilot tool exclusion and
+reasoning-effort translation, versioned `0.18.4+vibesys3`. The local source is
+`/home/v-yuzwang/ms-task/projects/kb/src/agentshim`, checkpoint
+`8f7b7c89ac3064bb761033b4856a81db77694574`. It also provides an opt-in
+operator CLI bridge for official cumulative usage-file counters, including
+exact resumed-turn differences (see `support/qwen3_openloop/README.md`).
+This is a compatibility rebuild,
+not the original dependency commit; experiment records must pin it separately.
+
 Every Copilot turn excludes `session_store_sql`, `store_memory`, and
 `vote_memory` through agentshim's typed tool-exclusion contract, including
 resumed turns and every role. Separate HOME directories do not isolate

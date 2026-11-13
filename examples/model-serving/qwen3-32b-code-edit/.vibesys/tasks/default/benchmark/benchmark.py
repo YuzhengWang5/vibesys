@@ -1,36 +1,9 @@
-"""
-Single-batch code-edit latency benchmark for predicted-outputs headroom.
+"""Measure aggregate code-edit capacity under independent open-loop arrivals.
 
-Drives an OpenAI-compatible ``/v1/completions`` server with code-debug
-samples drawn from ``m-a-p/CodeEditorBench``. Each request is sent
-**sequentially** (no concurrency) — the goal is to measure *single-batch*
-latency, which is what matters when you're optimizing speculative
-decoding for an interactive code-edit endpoint.
-
-Each request body carries the OpenAI predicted-outputs envelope
-(``prediction.content``) **in addition to** ``prompt``. Servers that
-don't implement predicted outputs (vLLM, SGLang today) ignore the
-field and the request still parses as a normal completion; a server
-that consumes the field is the configuration this benchmark scores.
-
-What the server MUST implement to score well here:
-
-1. ``POST /v1/completions`` accepting the usual OpenAI body plus an
-   optional ``prediction`` field of shape::
-
-       {"type": "content", "content": "<predicted output text>"}
-
-2. Streaming SSE response with ``choices[0].text`` deltas, terminated
-   by ``data: [DONE]``.
-
-Token count is canonicalised by re-tokenising the concatenated server
-output. This keeps tok/s independent of how the server batches accepted
-spec tokens into SSE chunks (vLLM/SGLang flush all accepted tokens in
-one chunk, which would otherwise undercount).
-
-Usage:
-    python benchmark.py --url http://localhost:8000 --num-samples 50 \\
-        --max-tokens 512 --output-json /tmp/code_edit.json
+Only the original chat-templated prompt is sent: no out-of-band draft or answer.
+Each request-rate level uses the same samples and separate untimed warmup.
+The score is max(sum(retokenized output tokens) / measured wall seconds) over
+fully successful levels, never median per-request speed or SSE chunk count.
 """
 
 from __future__ import annotations
@@ -39,10 +12,12 @@ import argparse
 import asyncio
 import difflib
 import json
+import math
 import random
 import statistics
 import sys
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -67,7 +42,7 @@ def _load_codeeditorbench(
     Returns a list of dicts with keys:
         - ``unique_id`` (str)
         - ``language`` (str)  -- one of ``python3``, ``cpp``, ``java``
-        - ``incorrect_code`` (str)  -- the prediction
+        - ``incorrect_code`` (str)  -- included only in the user prompt
         - ``gold_code`` (str)       -- the reference fixed solution
         - ``bug_type`` (str)
         - ``difficulty`` (str)
@@ -196,13 +171,14 @@ async def send_request(
     client: httpx.AsyncClient,
     url: str,
     prompt: str,
-    prediction_content: str,
     max_tokens: int,
     temperature: float,
     tokenizer,
     model_name: str | None = None,
     print_stream: bool = False,
     sample_id: str | None = None,
+    clock: Callable[[], float] = time.perf_counter,
+    request_timeout: float = 3600.0,
 ) -> dict:
     """Send one code-edit completion request and measure latency."""
     body: dict[str, Any] = {
@@ -210,10 +186,6 @@ async def send_request(
         "max_tokens": max_tokens,
         "temperature": temperature,
         "stream": True,
-        "prediction": {
-            "type": "content",
-            "content": prediction_content,
-        },
         "prompt_is_preformatted": True,
     }
     if model_name:
@@ -222,12 +194,9 @@ async def send_request(
     if print_stream:
         header = f"sample={sample_id}" if sample_id else ""
         sys.stderr.write(f"\n===== >>> PROMPT {header} =====\n{prompt}\n")
-        sys.stderr.write(
-            f"===== >>> PREDICTION ({len(prediction_content)} chars) =====\n{prediction_content}\n"
-        )
         sys.stderr.flush()
 
-    r = await stream_sse(client, url, body, timeout=600.0)
+    r = await stream_sse(client, url, body, timeout=request_timeout, clock=clock)
 
     if print_stream:
         sys.stderr.write(f"===== <<< OUTPUT =====\n{r.text}\n===== <<< END =====\n")
@@ -235,7 +204,7 @@ async def send_request(
 
     output_tokens = len(tokenizer.encode(r.text, add_special_tokens=False)) if r.text else 0
     result: dict = {
-        "error": r.error,
+        "error": r.error or ("empty completion" if not output_tokens else None),
         "output_tokens": output_tokens,
         "num_chunks": r.token_count,
         "output_text": r.text,
@@ -354,55 +323,139 @@ def _fmt_stats(values: list[float], unit: str = "ms", multiplier: float = 1000.0
 # ---------------------------------------------------------------------------
 
 
-async def run_benchmark(args: argparse.Namespace) -> dict:
+def summarize_capacity(results: list[dict], duration: float, request_rate: float) -> dict:
+    """Reject partial/empty workloads instead of scoring dropped requests."""
+    if not math.isfinite(duration) or duration <= 0:
+        raise ValueError("measured duration must be finite and positive")
+    failures = [
+        result for result in results if result["error"] is not None or result["output_tokens"] <= 0
+    ]
+    valid = len(results) >= 2 and not failures
+    tokens = sum(result["output_tokens"] for result in results)
+    return {
+        "request_rate": request_rate,
+        "valid": valid,
+        "total_output_tokens": tokens,
+        "throughput_tok_per_sec": tokens / duration if valid else None,
+    }
+
+
+def arrival_offsets(count: int, rate: float, seed: int) -> list[float]:
+    """Reproducible Poisson deadlines, independent of responses and send overhead."""
+    if count < 2 or not math.isfinite(rate) or rate <= 0:
+        raise ValueError("require at least two arrivals and a finite positive request rate")
+    rng = random.Random(seed)
+    offsets = [0.0]
+    for _ in range(count - 1):
+        offsets.append(offsets[-1] + rng.expovariate(rate))
+    return offsets
+
+
+async def dispatch_open_loop(
+    count: int,
+    rate: float,
+    seed: int,
+    send: Callable[[int], Awaitable[dict]],
+    *,
+    clock: Callable[[], float] = time.perf_counter,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> tuple[list[dict], float, dict]:
+    """Admit all arrivals on absolute deadlines, without client backpressure."""
+    offsets = arrival_offsets(count, rate, seed)
+    active = peak = 0
+    start = clock()
+
+    async def one(index: int, offset: float) -> dict:
+        nonlocal active, peak
+        await sleep(max(0.0, start + offset - clock()))
+        dispatch = clock()
+        active += 1
+        peak = max(peak, active)
+        try:
+            result = await send(index)
+        finally:
+            active -= 1
+        result["arrival_offset_sec"] = offset
+        result["dispatch_offset_sec"] = dispatch - start
+        result["dispatch_lag_sec"] = max(0.0, dispatch - start - offset)
+        result["arrival_latency_sec"] = clock() - start - offset
+        return result
+
+    async with asyncio.TaskGroup() as group:
+        tasks = [group.create_task(one(index, offset)) for index, offset in enumerate(offsets)]
+    results = [task.result() for task in tasks]
+    duration = clock() - start
+    return (
+        results,
+        duration,
+        {
+            "arrival_process": "poisson",
+            "scheduled_arrival_span_sec": offsets[-1],
+            "observed_peak_in_flight": peak,
+            "max_dispatch_lag_sec": max(result["dispatch_lag_sec"] for result in results),
+        },
+    )
+
+
+async def run_level(
+    args: argparse.Namespace,
+    samples: list[dict],
+    tokenizer,
+    request_rate: float,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+    clock: Callable[[], float] = time.perf_counter,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> dict:
     url = args.url.rstrip("/") + args.endpoint
     languages = [s.strip() for s in args.languages.split(",") if s.strip()]
+    prompts = [_build_prompt(tokenizer, sample) for sample in samples]
     print(
-        f"[bench] loading {args.num_samples} samples from m-a-p/CodeEditorBench "
-        f"(languages={languages or 'any'}, max_input_chars={args.max_input_chars})",
+        f"[bench] open-loop rate={request_rate} req/s: {len(samples)} requests to {url}",
         file=sys.stderr,
     )
-    samples = _load_codeeditorbench(
-        languages,
-        args.max_input_chars,
-        args.num_samples,
-        args.seed,
-    )
-    if not samples:
-        raise SystemExit("No samples could be loaded from CodeEditorBench.")
-
-    print(f"[bench] sending {len(samples)} sequential requests to {url}", file=sys.stderr)
-    print(
-        f"[bench] loading tokenizer for client-side chat templating: {args.tokenizer_path}",
-        file=sys.stderr,
-    )
-    tokenizer = _load_tokenizer(args.tokenizer_path)
 
     results: list[dict] = []
-    async with httpx.AsyncClient() as client:
-        t_start = time.perf_counter()
+    limits = httpx.Limits(max_connections=None, max_keepalive_connections=None)
+    async with httpx.AsyncClient(limits=limits, transport=transport) as client:
 
-        for idx, sample in enumerate(samples):
-            prompt = _build_prompt(tokenizer, sample)
+        async def one(idx: int) -> dict:
+            sample = samples[idx]
             result = await send_request(
                 client,
                 url,
-                prompt,
-                prediction_content=sample["incorrect_code"],
+                prompts[idx],
                 max_tokens=args.max_tokens,
                 temperature=args.temperature,
                 tokenizer=tokenizer,
                 model_name=args.model,
                 print_stream=args.print_stream,
                 sample_id=sample["unique_id"],
+                clock=clock,
+                request_timeout=args.request_timeout,
             )
             result["sample_id"] = sample["unique_id"]
             result["language"] = sample["language"]
             result["bug_type"] = sample["bug_type"]
             result["is_warmup"] = idx < args.warmup
+            return result
+
+        for idx in range(args.warmup):
+            results.append(await one(idx))
+        if any(result["error"] is not None for result in results):
+            raise RuntimeError(f"rate={request_rate}: warmup failed: {results}")
+        measured, wall_clock, load = await dispatch_open_loop(
+            len(samples) - args.warmup,
+            request_rate,
+            args.seed,
+            lambda index: one(index + args.warmup),
+            clock=clock,
+            sleep=sleep,
+        )
+        results.extend(measured)
+
+        for idx, (sample, result) in enumerate(zip(samples, results, strict=True)):
             if result["error"] is None:
-                # Token-level alignment vs the prediction (the buggy code)
-                # — this is the input the headroom estimator needs.
                 align = _token_align(
                     tokenizer,
                     sample["incorrect_code"],
@@ -418,8 +471,6 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
             else:
                 result["alignment"] = None
                 result["quality"] = None
-            results.append(result)
-
             align = result["alignment"]
             qual = result["quality"]
             print(
@@ -439,10 +490,6 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
                 + (f"err={result['error'][:80]}" if result["error"] else ""),
                 file=sys.stderr,
             )
-
-        t_end = time.perf_counter()
-
-    wall_clock = t_end - t_start
 
     steady = [r for r in results if not r["is_warmup"]]
     successes = [r for r in steady if r["error"] is None]
@@ -488,7 +535,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
 
     print()
     print("=" * 60)
-    print("  Single-batch code-edit latency benchmark")
+    print(f"  Code-edit open-loop benchmark: request_rate={request_rate}")
     print("=" * 60)
     print(f"Backend URL:       {url}")
     print(f"Samples (sent):    {len(results)} (warmup discarded: {args.warmup})")
@@ -511,7 +558,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         print(f"Median tok/s:          {tok_per_s:.1f}")
 
     print()
-    print("Token-level diff vs prediction (drives headroom estimator):")
+    print("Token-level diff vs original prompt code (diagnostic only):")
     print(f"  Aggregated match rate:  {aggregated_match_rate:.1%}")
     print(
         f"  Matched-run lengths (tokens): "
@@ -519,15 +566,18 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         f"p90={matched_run_pct['p90']} p95={matched_run_pct['p95']}"
     )
 
-    p50_latency_ms = percentile(sorted(latencies), 50) * 1000 if latencies else float("nan")
+    p50_latency_ms = percentile(sorted(latencies), 50) * 1000 if latencies else None
     median_tok_per_sec = (
         statistics.median(output_tokens) / statistics.median(latencies)
         if output_tokens and latencies and statistics.median(latencies)
-        else float("nan")
+        else None
     )
     print()
-    print(f"Primary metric: median_tok_per_sec = {median_tok_per_sec:.2f}")
-    print(f"  (also: p50_total_latency_ms = {p50_latency_ms:.1f})")
+    capacity = summarize_capacity(steady, wall_clock, request_rate)
+    if load["max_dispatch_lag_sec"] > args.max_dispatch_lag:
+        capacity["valid"] = False
+        capacity["throughput_tok_per_sec"] = None
+    print(f"Aggregate throughput: {capacity['throughput_tok_per_sec']} tok/s")
     print(f"Completed: {len(successes)}/{len(steady)} requests")
 
     chunk_counts = [r["num_chunks"] for r in successes]
@@ -536,6 +586,8 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         statistics.median(output_tokens) / median_chunks if median_chunks else None
     )
     result_dict: dict[str, Any] = {
+        **capacity,
+        **load,
         "config": {
             "url": url,
             "languages": languages,
@@ -550,6 +602,9 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         "num_steady": len(steady),
         "num_completed": len(successes),
         "num_failed": len(errors),
+        "errors": [
+            {"sample_id": result["sample_id"], "error": result["error"]} for result in errors
+        ],
         "num_improved_over_input": len(qual_improved),
         "num_echo_input_verbatim": len(qual_echo),
         "actual_duration_sec": wall_clock,
@@ -561,7 +616,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         "median_tokens_per_chunk": median_tok_per_chunk,
         "p50_total_latency_ms": p50_latency_ms,
         "median_tok_per_sec": median_tok_per_sec,
-        # Aggregate token-level diff stats (input prediction vs model output).
+        # Alignment is computed locally after measurement, never sent to the server.
         "aggregated_match_rate": aggregated_match_rate,
         "matched_run_pct_tokens": matched_run_pct,
         "per_sample": [
@@ -575,6 +630,10 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
                 "tpot_ms": (r["tpot"] or 0) * 1000 if r["tpot"] else None,
                 "latency_ms": r["total_latency"] * 1000,
                 "finish_reason": r["finish_reason"],
+                "arrival_offset_sec": r["arrival_offset_sec"],
+                "dispatch_offset_sec": r["dispatch_offset_sec"],
+                "dispatch_lag_sec": r["dispatch_lag_sec"],
+                "arrival_latency_sec": r["arrival_latency_sec"],
                 "alignment": r["alignment"],
                 "quality": r["quality"],
             }
@@ -589,22 +648,42 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         if len(errors) > 5:
             print(f"  ... and {len(errors) - 5} more")
 
-    if args.output_json:
-        Path(args.output_json).write_text(json.dumps(result_dict, indent=2))
-        print(f"\nResults written to {args.output_json}")
-
     return result_dict
+
+
+async def run_benchmark(args: argparse.Namespace) -> dict:
+    languages = [part.strip() for part in args.languages.split(",") if part.strip()]
+    samples = _load_codeeditorbench(languages, args.max_input_chars, args.num_samples, args.seed)
+    if len(samples) != args.num_samples:
+        raise ValueError(f"expected {args.num_samples} samples, loaded {len(samples)}")
+    tokenizer = _load_tokenizer(args.tokenizer_path)
+    levels = [await run_level(args, samples, tokenizer, rate) for rate in args.request_rates]
+    valid = all(level["valid"] for level in levels)
+    best = max(levels, key=lambda level: level["throughput_tok_per_sec"] or 0)
+    report = {
+        "valid": valid,
+        "max_throughput_tok_per_sec": best["throughput_tok_per_sec"] if valid else None,
+        "load_model": "open-loop-poisson",
+        "best_request_rate": best["request_rate"] if valid else None,
+        "request_rates": args.request_rates,
+        "rate_results": levels,
+    }
+    if args.output_json:
+        Path(args.output_json).write_text(json.dumps(report, indent=2, allow_nan=False))
+    if not valid:
+        raise RuntimeError("open-loop sweep failed: every arrival must complete without client lag")
+    print(
+        f"Primary metric: max_throughput_tok_per_sec = {report['max_throughput_tok_per_sec']:.2f}"
+    )
+    print(f"Best request rate: {report['best_request_rate']}")
+    return report
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Single-batch code-edit latency benchmark using "
-            "m-a-p/CodeEditorBench (code-debug rows). Drives an OpenAI-"
-            "compatible /v1/completions server. Each request body carries "
-            "an OpenAI-style `prediction.content` field; servers that "
-            "consume it (predicted-outputs) score; servers that ignore it "
-            "still get a valid request and run as normal completions."
+            "Peak aggregate code-edit throughput under open-loop request-rate load. "
+            "Only original prompts are sent, with no out-of-band draft field."
         ),
     )
     parser.add_argument("--url", default="http://localhost:8000", help="Server base URL")
@@ -635,7 +714,7 @@ def main() -> None:
         help="Skip rows whose buggy program is longer than this (default: 4000).",
     )
     parser.add_argument(
-        "--num-samples", type=int, default=50, help="Total samples to send (default: 50)."
+        "--num-samples", type=int, default=64, help="Total samples to send (default: 64)."
     )
     parser.add_argument(
         "--warmup",
@@ -651,18 +730,36 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--request-rates",
+        type=float,
+        nargs="+",
+        default=[0.25, 1, 4, 16],
+        help="Poisson arrival rates in req/s; no client concurrency limit.",
+    )
+    parser.add_argument(
+        "--request-timeout",
+        type=float,
+        default=3600,
+        help="Per-request timeout including server-side queuing.",
+    )
+    parser.add_argument(
+        "--max-dispatch-lag",
+        type=float,
+        default=1.0,
+        help="Fail if the client misses any arrival deadline by more seconds.",
+    )
+    parser.add_argument(
         "--print-stream",
         action="store_true",
-        help="Print prompt/prediction and stream output deltas live to stderr.",
+        help="Print prompt and output to stderr (not recommended for performance runs).",
     )
     parser.add_argument(
         "--output-json", type=str, default=None, help="Optional path to write structured results."
     )
     # Back-compat no-ops so the orchestrator's sanity invocation accepts these.
-    parser.add_argument("--rate", type=float, default=None, help="Ignored — single-batch only.")
     parser.add_argument("--num-requests", type=int, default=None, help="Alias for --num-samples.")
     parser.add_argument(
-        "--duration", type=float, default=None, help="Ignored — runs to --num-samples."
+        "--duration", type=float, default=None, help="Compatibility no-op; drains every arrival."
     )
     parser.add_argument(
         "--prompt-len", type=int, default=None, help="Ignored — prompts come from the dataset."
@@ -674,8 +771,19 @@ def main() -> None:
     args = parser.parse_args()
     if args.num_requests is not None:
         args.num_samples = args.num_requests
-    if args.warmup >= args.num_samples:
-        args.warmup = max(0, args.num_samples - 1) if args.num_samples > 1 else 0
+    if args.warmup < 0 or args.num_samples <= args.warmup:
+        parser.error("require 0 <= warmup < num_samples")
+    if len(args.request_rates) < 2 or len(set(args.request_rates)) != len(args.request_rates):
+        parser.error("require at least two distinct request rates")
+    if any(not math.isfinite(rate) or rate <= 0 for rate in args.request_rates):
+        parser.error("request rates must be finite and positive")
+    if args.num_samples - args.warmup < 2:
+        parser.error("require at least two measured requests")
+    if any(
+        not math.isfinite(value) or value <= 0
+        for value in (args.request_timeout, args.max_dispatch_lag)
+    ):
+        parser.error("request timeout and dispatch lag must be finite and positive")
     asyncio.run(run_benchmark(args))
 
 

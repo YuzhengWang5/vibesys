@@ -53,6 +53,31 @@ def _make_sse_response(chunks: list[str], status: int = 200) -> httpx.Response:
     )
 
 
+class SSETransport(httpx.AsyncBaseTransport):
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=self.content, request=request)
+
+
+@pytest.mark.parametrize(
+    ("tail", "error"),
+    [
+        ("", "without [DONE]"),
+        ('data: {"error":{"message":"out of memory"}}\n\n', "out of memory"),
+        ("data: []\n\n", "JSON object"),
+    ],
+)
+async def test_partial_output_is_not_success(tail: str, error: str) -> None:
+    transport = SSETransport(f"data: {_chunk('partial')}\n\n{tail}")
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await stream_sse(client, "http://in-memory", {"stream": True})
+    assert result.text == "partial"
+    assert result.error is not None
+    assert error in result.error
+
+
 class TestStreamSSE:
     @pytest.mark.asyncio
     async def test_basic_streaming(self) -> None:

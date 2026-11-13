@@ -9,6 +9,8 @@ description = "Benchmark toolkit for VibeSys model-serving input bundles"
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.27",
+    "numpy>=1.26",
+    "pydantic>=2",
 ]
 
 [project.optional-dependencies]

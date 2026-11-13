@@ -68,6 +68,17 @@ def _extract_usage(chunk: dict[str, object]) -> dict[str, int] | None:
     return {k: v for k, v in chunk_usage.items() if isinstance(v, int)}
 
 
+def _parse_chunk(payload: str) -> dict[str, object]:
+    chunk = json.loads(payload)
+    if not isinstance(chunk, dict):
+        message = "SSE payload must be a JSON object"
+        raise TypeError(message)
+    if "error" in chunk:
+        message = f"SSE server error: {chunk['error']}"
+        raise ValueError(message)
+    return chunk
+
+
 async def stream_sse(
     client: httpx.AsyncClient,
     url: str,
@@ -81,7 +92,8 @@ async def stream_sse(
 
     Measures TTFT (time to first token) and inter-token latencies. The request
     body is sent as-is; ``stream: true`` should already be included by the
-    caller if desired (this function does not inject it).
+    caller if desired (this function does not inject it). A successful response
+    must end with ``[DONE]``; truncated streams and server error events fail.
     """
     started = clock()
     first_token: float | None = None
@@ -90,6 +102,7 @@ async def stream_sse(
     text_parts: list[str] = []
     finish_reason: str | None = None
     usage: dict[str, int] | None = None
+    saw_done = False
 
     try:
         async with client.stream("POST", url, json=body, timeout=timeout) as resp:
@@ -99,8 +112,9 @@ async def stream_sse(
                     continue
                 payload = raw_line[len("data: ") :].strip()
                 if payload == "[DONE]":
+                    saw_done = True
                     break
-                chunk: dict[str, object] = json.loads(payload)
+                chunk = _parse_chunk(payload)
                 text = _extract_text(chunk)
                 if text:
                     now = clock()
@@ -115,7 +129,7 @@ async def stream_sse(
                 u = _extract_usage(chunk)
                 if u is not None:
                     usage = u
-    except (httpx.HTTPError, json.JSONDecodeError) as exc:
+    except (httpx.HTTPError, ValueError, TypeError) as exc:
         return StreamResult(
             text="".join(text_parts),
             token_count=token_count,
@@ -134,4 +148,5 @@ async def stream_sse(
         itl=itl,
         finish_reason=finish_reason,
         usage=usage,
+        error=None if saw_done else "SSE stream ended without [DONE]",
     )

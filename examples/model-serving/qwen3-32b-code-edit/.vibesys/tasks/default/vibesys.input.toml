@@ -5,13 +5,13 @@ backends = ["cuda"]
 domain = "llm-serving"
 
 [accuracy]
-command = ["python", "${PROJECT_ROOT}/.vibesys/tasks/default/managed_evaluation.py", "--", "uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/checker.py", "--tokenizer-path", "/model", "--seed", "42"]
+command = ["python", "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/launch.py", "--tokenizer-path", "/model", "--seed", "42"]
 timeout_seconds = 1800
 
 [benchmark]
-command = ["python", "${PROJECT_ROOT}/.vibesys/tasks/default/managed_evaluation.py", "--", "uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/benchmark.py", "--tokenizer-path", "/model", "--seed", "42", "--num-samples", "50", "--warmup", "3", "--max-tokens", "512"]
-timeout_seconds = 4500
+command = ["python", "${PROJECT_ROOT}/.vibesys/tasks/default/managed_evaluation.py", "--", "uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/benchmark.py", "--tokenizer-path", "/model", "--seed", "42", "--num-samples", "64", "--warmup", "3", "--max-tokens", "512", "--request-rates", "0.25", "1", "4", "16", "--request-timeout", "3600", "--max-dispatch-lag", "1"]
+timeout_seconds = 10800
 
 [benchmark.result]
 json_argument = "--output-json"
-metric = "median_tok_per_sec"
+metric = "max_throughput_tok_per_sec"
