@@ -53,7 +53,7 @@ from vs_issue_tracker.api import FakeRoadmap, PutRoadmapItems, ReadRoadmap
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vs_core.api import Scope, SearchDef
+    from vs_core.api import RunFacts, Scope, SearchDef
     from vs_core.api.testing import Asked, FakeView, FlowRun
 
 TERMS = TaskTerms(
@@ -132,10 +132,11 @@ class SerialHost:
         *,
         restarting: bool,
         view: FakeView | None = None,
+        facts: RunFacts = FACTS,
         **world: Unpack[World],
     ) -> Self:
         """Start ``search`` of ``config`` under a host; ``world`` sets how the far side behaves."""
-        run = start_flow(search, config, facts=FACTS, restarting=restarting, view=view)
+        run = start_flow(search, config, facts=facts, restarting=restarting, view=view)
         return cls(cast("FlowRun[object]", run), **world)
 
     @property
