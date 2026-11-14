@@ -998,6 +998,8 @@ mapping above, each deliberate:
 - `ValidateLocal` is optional. A run that cannot offer it (no isolated candidate workspaces) approves
   on the judge's verdict and records a `validate-local-not-offered` note; a refused or failed
   validation run is a note too, since nothing is wrong with the candidate.
+  Running candidate tests receives the task's full measurement time budget, with the operation
+  budget as a lower bound; the shorter metadata-read limit must not truncate an executing suite.
 - Prompts are domain-agnostic as `single`'s are: the evidence the loop kept in progress files (history,
   frontier, notices, the implementer's claims for the judge, the profile) is rendered from typed
   rows, the validation recipe contract is rendered from its schema, and the profiler prompt is the

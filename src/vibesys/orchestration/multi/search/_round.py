@@ -33,6 +33,7 @@ from vs_core.api.search import (
     Failed,
     FailureReason,
     Flow,
+    MeasurementRecipe,
     Session,
     Settlement,
     Stopped,
@@ -292,6 +293,12 @@ async def validate(ctx: Flow, attempt: MultiAttempt, ws: Workspace) -> Next:
         message = "only a retained candidate with a recipe is validated"
         raise ValueError(message)
     report = await ctx.evaluation.validate_local(
-        attempt.candidate, recipe, workspace=ws, within=ctx.task.terms.operation_seconds
+        attempt.candidate,
+        recipe,
+        workspace=ws,
+        within=max(
+            ctx.task.terms.operation_seconds,
+            MeasurementRecipe.of(ctx.facts).budget(),
+        ),
     )
     return attempt.validated(None if isinstance(report, Failed) else report)

@@ -29,6 +29,7 @@ from tests.vibesys.orchestration.multi._host import (
 )
 from tests.vibesys.search_faults import assert_flow_closed
 from tests.vibesys.serial_search._host import (
+    FACTS,
     INPUT_THROUGHPUT,
     Baseline,
     World,
@@ -36,11 +37,14 @@ from tests.vibesys.serial_search._host import (
 from tests.vibesys.serial_search._replies import plan_reply
 from tests.vibesys.vibesys_flows import across_restarts
 
+from vibesys.orchestration.multi.search.api import multi
 from vs_core.api import (
+    Capabilities,
     CheckpointDecline,
     Declined,
     FailureReason,
     Finish,
+    MeasurementRecipe,
     Operation,
     RequestTurn,
     Retained,
@@ -50,6 +54,7 @@ from vs_core.api import (
     Wait,
     Withdraw,
 )
+from vs_core.api.testing import FakeView
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -158,6 +163,65 @@ def test_a_blocked_implementer_ends_the_round_and_nothing_is_adopted(*, restarti
     host.drain()
 
     assert selection_of(host) == ("trusted_baseline", None)
+    assert_flow_closed(host)
+
+
+@MODES
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(
+    execution_seconds=st.integers(min_value=301, max_value=3600),
+    operation_seconds=st.sampled_from((30, 20000)),
+)
+def test_local_validation_has_execution_time_not_only_the_metadata_read_limit(
+    *, restarting: bool, execution_seconds: int, operation_seconds: int
+) -> None:
+    terms = FACTS.task
+    assert terms is not None
+    terms = terms.model_copy(
+        update={
+            "operation_seconds": operation_seconds,
+            "stages": tuple(
+                stage.model_copy(update={"execution_seconds": execution_seconds})
+                for stage in terms.stages
+            ),
+        }
+    )
+    facts = FACTS.model_copy(update={"task": terms})
+    assert multi.operations is not None
+    host = MultiHost.begin(
+        multi,
+        config(),
+        restarting=restarting,
+        facts=facts,
+        view=FakeView(
+            changes={
+                "capabilities": Capabilities(operations=multi.operations.registry().descriptors)
+            }
+        ),
+    )
+    host.drain_until_turn(PLANNER)
+    design(host)
+    host.drain_until_turn(IMPLEMENTER)
+    host.run.reply(
+        host.run.expect_turn(role=IMPLEMENTER),
+        implemented(validation_recipe_artifact=RECIPE),
+        checkpoint=Retained(revision=RevisionRef.of_git_commit("candidate")),
+    )
+    judge(host, passed=True)
+    host.drain()
+
+    validations = [
+        item
+        for item in host.run.decisions
+        if isinstance(item, Wait)
+        and isinstance(item.request, Operation)
+        and isinstance(item.request.request, ValidateLocalBase)
+    ]
+    assert len(validations) == 1
+    assert validations[0].until.limit >= max(
+        operation_seconds, MeasurementRecipe.of(facts).budget()
+    )
+    assert selection_of(host) == ("retained_candidate", "candidate")
     assert_flow_closed(host)
 
 
