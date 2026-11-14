@@ -334,6 +334,7 @@ class _Later(NamedTuple):
 
 @settings(max_examples=examples(pr=20, nightly=300))
 @given(
+    sequence=st.integers(min_value=0, max_value=8),
     later=st.builds(
         _Later,
         status=st.sampled_from(list(core.ObservationStatus)),
@@ -341,10 +342,11 @@ class _Later(NamedTuple):
         released=st.booleans(),
         children_complete=st.booleans(),
         terminal=st.booleans(),
-    )
+    ),
 )
 def test_a_later_answer_for_a_record_the_close_ended_proves_its_release_or_is_typed(
     later: _Later,
+    sequence: int,
 ) -> None:
     """A later host inspects a record core failed while closing; the executor answers.
 
@@ -367,7 +369,7 @@ def test_a_later_answer_for_a_record_the_close_ended_proves_its_release_or_is_ty
     answer = ended.model_copy(
         update={
             "event_id": core.EventId(root="later-host:inspection"),
-            "sequence": ended.sequence + 1,
+            "sequence": sequence,
             "diagnostic": "",
             **later._asdict(),
         }
@@ -388,3 +390,49 @@ def test_a_later_answer_for_a_record_the_close_ended_proves_its_release_or_is_ty
     assert record.observation.diagnostic == ended.diagnostic
     assert record.observation.released == later.released
     assert record.observation.children_complete == later.children_complete
+
+
+@pytest.mark.parametrize("answered_before_deadline", [False, True])
+def test_initial_executor_release_can_refine_a_locally_closed_request(
+    *,
+    answered_before_deadline: bool,
+) -> None:
+    """Local timeout numbering must not conflict with the executor's first sequence zero."""
+    state = _record(
+        core.LifecycleClass.IDEMPOTENT_WRITE,
+        _SILENT_ANSWERS[0],
+        accepted=answered_before_deadline,
+        named=False,
+    )
+    if not answered_before_deadline:
+        record = _original(state).model_copy(update={"observation": None, "sequence": None})
+        state = state.model_copy(
+            update={"records": state.records.model_copy(update={"records": (record,)})}
+        )
+    closed = _close_after(state, restart=False, late_by=1.0, stop_first=True)
+    original = _original(closed)
+    ended = original.observation
+    assert ended is not None
+    assert original.phase == core.RequestPhase.COMPLETED
+    assert "closed while this request was blocked" in ended.diagnostic
+    answer = ended.model_copy(
+        update={
+            "event_id": core.EventId(root="executor:first-inspection"),
+            "sequence": 0,
+            "status": core.ObservationStatus.UNKNOWN,
+            "released": True,
+            "children_complete": True,
+            "diagnostic": "",
+        }
+    )
+    event = core.RequestObserved(observation=answer)
+    observed = core.step(closed, event).state
+    refined = _original(observed)
+    assert refined.phase == core.RequestPhase.COMPLETED
+    assert refined.failure == original.failure
+    assert refined.observation is not None
+    assert refined.observation.status == core.ObservationStatus.FAILED
+    assert refined.observation.diagnostic == ended.diagnostic
+    assert refined.observation.released
+    assert refined.observation.children_complete
+    assert _original(core.step(observed, event).state) == refined

@@ -7,6 +7,9 @@ completes decisions it owns. Observations are never accepted with a
 non-increasing sequence: duplicates and older sequences are inert, a different
 fact at an accepted sequence is a typed rejection.
 
+Forced local closure has no executor sequence. Subsequent executor facts may only
+refine its release evidence, never replace its disposition.
+
 Unknown acceptance and retryable failures keep the record open for a later,
 higher-sequence observation; only a conclusive terminal observation closes it,
 exactly once. Recovery (``_request_recovery``) reads this ledger and never writes
@@ -478,6 +481,12 @@ def _apply(
             ("observation", "request_id"), "observation requires committed dispatch authorization"
         )
     previous = record.observation
+    if (
+        record.phase == RequestPhase.COMPLETED
+        and previous is not None
+        and previous.diagnostic == _BLOCKED_AT_CLOSE
+    ):
+        return _refine(state, record, observation)
     fresh = fresh_observation(() if previous is None else (previous,), observation, complete=True)
     if isinstance(fresh, Mismatch) and fresh.field == ProofField.SEQUENCE:
         if previous is not None and observation.sequence < previous.sequence:
