@@ -36,6 +36,14 @@ def _reply_value(data: dict) -> dict:
     return reply.get("value", {}) if isinstance(reply, dict) else {}
 
 
+def _identity(event: dict) -> str:
+    identity = event.get("execution_id")
+    if not isinstance(identity, str) or not identity:
+        message = f"{event['type']} has no invocation identity"
+        raise ValueError(message)
+    return identity
+
+
 def _totals(records: dict[str, dict]) -> tuple[dict, list[str]]:
     totals: dict[str, dict] = defaultdict(lambda: {"turns": 0, **dict.fromkeys(COUNTERS, 0)})
     missing = []
@@ -71,8 +79,8 @@ def summarize(events: list[dict]) -> dict:
     for event in events:
         kind = event["type"]
         data = event.get("data") or {}
-        identity = event.get("execution_id")
         if kind == "agent_execution_started":
+            identity = _identity(event)
             role = event["agent_kind"]
             planning = role in ("multi-orchestrator", "multi-profiler")
             records[identity] = {
@@ -86,10 +94,15 @@ def summarize(events: list[dict]) -> dict:
             if planning:
                 pending.add(identity)
         elif kind == "turn_usage_recorded":
+            identity = _identity(event)
             record = records[identity]
             usage = {key: data[key] for key in COUNTERS}
-            record["usage"] = usage if usage["input_tokens"] + usage["output_tokens"] > 0 else None
+            known = all(value is not None for value in usage.values())
+            record["usage"] = (
+                usage if known and usage["input_tokens"] + usage["output_tokens"] > 0 else None
+            )
         elif kind == "agent_execution_finished":
+            identity = _identity(event)
             record = records[identity]
             record["status"] = event.get("status")
             record["finished_at"] = event["timestamp"]
