@@ -45,7 +45,9 @@ def _publish(run: Path, report: dict, status: dict, seen_errors: set[int]) -> No
             LOGGER.error("Framework fault: %s", error)
 
 
-async def execute(run: Path, run_id: str) -> int:
+async def execute(
+    run: Path, run_id: str, *, acknowledged_missing_usage: frozenset[str] = frozenset()
+) -> int:
     """Watch every 30 seconds; surface faults while framework-owned retries run."""
     os.environ["VIBESYS_STATE_HOME"] = str(run / "machine-local")
     project = Project.open(run / "project")
@@ -57,10 +59,15 @@ async def execute(run: Path, run_id: str) -> int:
     sequence = -1
     seen_errors: set[int] = set()
     fatal = False
+    if acknowledged_missing_usage:
+        LOGGER.warning(
+            "Operator acknowledged missing CLI usage; costs remain incomplete: %s",
+            sorted(acknowledged_missing_usage),
+        )
     try:
         while True:
             events = read_events(core_log)
-            report = summarize(events)
+            report = summarize(events, acknowledged_missing_usage=acknowledged_missing_usage)
             if events and events[-1]["sequence"] != sequence:
                 sequence = events[-1]["sequence"]
                 last_progress = clock.now()
@@ -71,6 +78,9 @@ async def execute(run: Path, run_id: str) -> int:
                 "current_optimization": report["current_optimization"],
                 "rounds_finished": len(report["rounds"]),
                 "missing_usage": report["missing_usage"],
+                "acknowledged_missing_usage": report["acknowledged_missing_usage"],
+                "unacknowledged_missing_usage": report["unacknowledged_missing_usage"],
+                "usage_complete": report["usage_complete"],
                 "latest_gate": next(
                     (
                         event
@@ -81,7 +91,7 @@ async def execute(run: Path, run_id: str) -> int:
                 ),
             }
             _publish(run, report, status, seen_errors)
-            if report["missing_usage"] or len(report["rounds"]) > MAX_ROUNDS:
+            if report["unacknowledged_missing_usage"] or len(report["rounds"]) > MAX_ROUNDS:
                 LOGGER.error("Accounting/budget invariant failed: %s", status)
                 fatal = True
             if clock.now() - last_progress > MAX_IDLE_SECONDS:
@@ -95,7 +105,10 @@ async def execute(run: Path, run_id: str) -> int:
             await asyncio.wait({pending}, timeout=30)
         code = await asyncio.wait_for(asyncio.shield(pending), timeout=600)
         events = read_events(core_log)
-        save(run / "logs/token-costs.json", summarize(events))
+        save(
+            run / "logs/token-costs.json",
+            summarize(events, acknowledged_missing_usage=acknowledged_missing_usage),
+        )
         save(run / "logs/monitor-exit.json", {"framework_returncode": code, "monitor_fault": fatal})
         return 2 if fatal else code
     finally:
@@ -113,9 +126,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
+    parser.add_argument(
+        "--acknowledge-missing-usage",
+        action="append",
+        default=[],
+        metavar="INVOCATION_ID",
+        help="Explicitly accept this invocation's unknown cost on recovery; never fills it with zero.",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    raise SystemExit(asyncio.run(execute(args.run.resolve(), args.run_id)))
+    raise SystemExit(
+        asyncio.run(
+            execute(
+                args.run.resolve(),
+                args.run_id,
+                acknowledged_missing_usage=frozenset(args.acknowledge_missing_usage),
+            )
+        )
+    )
 
 
 if __name__ == "__main__":
