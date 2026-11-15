@@ -44,6 +44,7 @@ from .types.scheduling import (
     AttemptRequested,
     ClockAdvanced,
     QueueEntryRetired,
+    RecoveryAdmissionReady,
     RegisterAttempt,
     RunDrained,
     SchedulingState,
@@ -664,8 +665,8 @@ def schedule(
             )
         case AdmissionControl():
             return _control(state, context, event)
-        case AdoptionFenceLifted():
-            # The fence is part of `_fits`; this only retries admission.
+        case AdoptionFenceLifted() | RecoveryAdmissionReady():
+            # Fences are part of `_fits`; this only retries admission.
             change = _fill(state, context)
         case _:
             assert_never(event)

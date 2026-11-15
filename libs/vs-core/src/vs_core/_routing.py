@@ -84,6 +84,7 @@ from .types.scheduling import (
     ClockAdvanced,
     CloseAdmission,
     QueueEntryRetired,
+    RecoveryAdmissionReady,
     RegisterAttempt,
     RunDrained,
     SlotChargeEnded,
@@ -147,6 +148,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | ClockAdvanced()
             | AdmissionControl()
             | AdoptionFenceLifted()
+            | RecoveryAdmissionReady()
             | AdmitAttempt()
             | CloseAdmission()
             | RunDrained()

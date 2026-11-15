@@ -131,8 +131,8 @@ from .types.scheduling import (
     AttemptReopenRequest,
     AttemptRequest,
     AttemptRequested,
-    ClockAdvanced,
     CloseAdmission,
+    RecoveryAdmissionReady,
     RegisterAttempt,
     RunDrained,
     SchedulingEvent,
@@ -535,7 +535,7 @@ def _activation_signal(
             raise ContractError(
                 ("recovery", "phase"), "ready notification requires committed barrier proof"
             )
-        return Transition(state=state), (ClockAdvanced(now_at=state.run.now_at),)
+        return Transition(state=state), (RecoveryAdmissionReady(),)
     return _admission_signal(state, signal)
 
 
