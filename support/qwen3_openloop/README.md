@@ -61,3 +61,9 @@ missing_usage，由监控器显式报告统计缺失，不能让 null 算术异�
 重试与失败成本也保留。基础设施故障由 operator 查看告警、
 修复并提交 main，再用新的 run 和 tested_commit 重试，不在运行中热改源码。
 本目录是外层实验工具，不修改框架默认预算，也不把人工停止误称自然成功。
+
+经operator明确授权，可以在恢复时逐条传入
+`--acknowledge-missing-usage INVOCATION_ID`。默认仍拒绝任何已结束的缺失用量；
+授权仅针对给定调用，不会豁免后续新缺失。投影保留missing_usage及null调用，
+另列acknowledged/unacknowledged_missing_usage，usage_complete仍为false；
+Token仅为已知小计，不是完整费用，也不能按0补造。监控日志显式警告该授权。

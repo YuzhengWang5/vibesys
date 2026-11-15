@@ -65,11 +65,14 @@ def _assign_planning(records: dict[str, dict], pending: set[str], stage: str) ->
     pending.clear()
 
 
-def summarize(events: list[dict]) -> dict:
+def summarize(
+    events: list[dict], *, acknowledged_missing_usage: frozenset[str] = frozenset()
+) -> dict:
     """Attribute every invocation once, including planning, judge, and retries.
 
     Planning before a design is backfilled to that design. Planning after the
     final design remains unassigned; it must not be silently charged elsewhere.
+    Acknowledgements permit operator recovery, never supply missing counts.
     """
     stage = "baseline"
     records: dict[str, dict] = {}
@@ -123,6 +126,14 @@ def summarize(events: list[dict]) -> dict:
         "by_optimization": totals,
         "invocations": list(records.values()),
         "missing_usage": missing,
+        "acknowledged_missing_usage": [
+            identity for identity in missing if identity in acknowledged_missing_usage
+        ],
+        "unacknowledged_missing_usage": [
+            identity for identity in missing if identity not in acknowledged_missing_usage
+        ],
+        "usage_complete": not missing
+        and all(record["status"] != "active" for record in records.values()),
         "errors": errors,
         "rounds": rounds,
         "current_optimization": stage,
