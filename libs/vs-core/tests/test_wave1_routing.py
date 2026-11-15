@@ -171,6 +171,7 @@ EXPECTED_TARGET = {
                 "clock_advanced",
                 "admission_control",
                 "adoption_fence_lifted",
+                "recovery_admission_ready",
             ),
         ),
     )

@@ -236,6 +236,47 @@ def test_a_pending_recovery_check_needs_a_target_still_in_flight() -> None:
     ]
 
 
+@given(
+    turn=st.booleans(),
+    status=st.sampled_from(
+        [ObservationStatus.SUCCEEDED, ObservationStatus.FAILED, ObservationStatus.CANCELLED]
+    ),
+    accepted=st.booleans(),
+    proof=st.sampled_from(["complete", "wrong-scope", "unreleased", "incomplete-children"]),
+)
+def test_a_request_only_recovery_wait_rechecks_a_committed_released_target(
+    *, turn: bool, status: ObservationStatus, accepted: bool, proof: str
+) -> None:
+    target = turn_record() if turn else pending_record()
+    observation = Observation(
+        event_id=EventId(root="released-target"),
+        request_id=target.request_id,
+        scope=target.request.scope
+        if proof != "wrong-scope"
+        else target.request.scope.model_copy(
+            update={"generation": target.request.scope.generation + 1}
+        ),
+        sequence=1,
+        observed_at=1.0,
+        status=status,
+        accepted=accepted,
+        resource_id=ResourceId(root="resource"),
+        terminal=True,
+        released=proof != "unreleased",
+        children_complete=proof != "incomplete-children",
+    )
+    target = target.model_copy(update={"phase": RequestPhase.COMPLETED, "observation": observation})
+    state = _recovering(target)
+    result = step(state, ClockAdvanced(now_at=2.0))
+    if proof == "complete":
+        assert result.state.records.recovery.phase == RecoveryPhase.READY
+        assert result.state.records.recovery.checks[0].resolution == "terminal"
+        assert orphan_waits(result.state) == ()
+    else:
+        assert result.state.records.recovery.phase != RecoveryPhase.READY
+        assert result.state.records.recovery.checks[0].resolution == "pending"
+
+
 def test_a_pending_recovery_check_with_its_inspection_in_flight_is_not_an_orphan() -> None:
     done = _recovering(pending_record(identity="target", phase=RequestPhase.COMPLETED))
     inspection = pending_record(identity="inspection", phase=RequestPhase.PREPARED)

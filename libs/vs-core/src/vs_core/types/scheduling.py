@@ -202,6 +202,12 @@ class AdoptionFenceLifted(Value):
     kind: Literal["adoption_fence_lifted"] = "adoption_fence_lifted"
 
 
+class RecoveryAdmissionReady(Value):
+    """Recovery opened admission; recheck the queue without repeating clock-driven polls."""
+
+    kind: Literal["recovery_admission_ready"] = "recovery_admission_ready"
+
+
 # Admission/closure are internal signals, never shell I/O.
 type SchedulingEvent = Annotated[
     AttemptRequested
@@ -212,6 +218,7 @@ type SchedulingEvent = Annotated[
     | QueueEntryRetired
     | ClockAdvanced
     | AdmissionControl
-    | AdoptionFenceLifted,
+    | AdoptionFenceLifted
+    | RecoveryAdmissionReady,
     Field(discriminator="kind"),
 ]

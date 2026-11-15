@@ -542,11 +542,10 @@ def lapsed_job_waits(core: CoreState) -> tuple[JobWaitLapsed, ...]:
 def lapsed_check_waits(core: CoreState) -> tuple[RecoveryCheckWaitLapsed, ...]:
     """One wake per pending recovery check whose named entities settled and left it waiting.
 
-    An answer about a check's target re-resolves the check, so a check waiting only on
-    requests is moved by their answers. One that also waits on an entity (an ensure's session
-    still learning whether it holds the resource) heard its answer before that entity settled;
-    once nothing it names can move it, it is woken so recovery resolves it from the current
-    state (``RecoveryCheckWaitLapsed``).
+    A target can settle through its owner after its inspection answered, including a turn
+    cancelled during recovery. Once nothing the check names can move it, wake it so recovery
+    resolves it from the current state (``RecoveryCheckWaitLapsed``). This also covers a
+    check whose ensure session settled after its inspection.
     """
     if core.run.status == RunStatus.TERMINAL or not recovery_waits(core.records.recovery.phase):
         return ()
@@ -556,7 +555,6 @@ def lapsed_check_waits(core: CoreState) -> tuple[RecoveryCheckWaitLapsed, ...]:
         for check in core.records.recovery.checks
         if check.resolution == "pending"
         and check.wait is not None
-        and check.wait.subjects
         and not _live(core.records, named, check.wait, frozenset(), frozenset())
     )
 
