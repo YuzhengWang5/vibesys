@@ -33,16 +33,12 @@ accuracy 保留已校准的 HF BF16 teacher-forced gate：54 个位置，
 实现范围见 [OBJECTIVE.md](.vibesys/tasks/default/OBJECTIVE.md)。
 候选不得修改可信输入、门禁阈值或基准。
 
-基线之后由 agent 自选五个大优化点的顺序：FlashInfer、算子融合、
-动态组 batch（合并 continuous/dynamic batching，含多请求 prefill/decode 混合组批调度）、
-原 prompt n-gram 投机解码、CUDA Graph，不实施权重量化。
-每个大优化只占用一个连续的 outerloop 区间；agent 宣布完成并切换后永久关闭，
-不能在后面重新设计该项，四 token/十六 token n-gram 也必须在同一阶段完成。
-每轮最多当前大优化内的一项具体改进，争取在五次 innerloop 机会内完成，
-允许连续多轮继续同一项。serial multi-agent 启动时显式传
-`--outer-loop agent --max-rounds 20 --max-retries-per-round 5`；
-五项共享20轮总预算，不修改整个框架的默认预算。
-按每阶段入口与最终保留的正式吞吐报告净提升和相对提升；
-失败尝试保留，零收益阶段记零，不把最后一个负结果或各轮百分比之和当阶段收益。
-每项优化的实际 token 用量由外层逐角色、逐轮及连续阶段归集；
-外层监督禁止前缀交错/重开，具体改动归属仍需源码审查。
+本次按OBJECTIVE内17份execution plan逐轮执行，不再自主排序或限制大类只能连续出现。
+自动baseline不占第1轮；第1轮控制、第16轮观测校准，其他轮每轮只做指定的一项机制。
+失败或无收益时保留可信incumbent，下一轮照顺序继续，不插入额外轮次或提前叠加。
+serial multi-agent显式传
+`--outer-loop agent --inner-loop multi-agent --max-rounds 17 --max-retries-per-round 5`，
+不修改框架默认预算。逐轮hypothesis id须满足OBJECTIVE表中的类别与轮号前缀，
+外层监督映射，judge审查实际机制；不把id一致当成语义依从证明。
+不提供历史实现或成绩，所有候选都要经过本次严格精度与完整5 RPS正式测量。
+逐轮记录计划完成、失败重试、吞吐、保留决定及真实Token，控制复测不记优化收益。
