@@ -33,12 +33,18 @@ accuracy 保留已校准的 HF BF16 teacher-forced gate：54 个位置，
 实现范围见 [OBJECTIVE.md](.vibesys/tasks/default/OBJECTIVE.md)。
 候选不得修改可信输入、门禁阈值或基准。
 
-本次按OBJECTIVE内17份execution plan逐轮执行，不再自主排序或限制大类只能连续出现。
-自动baseline不占第1轮；第1轮控制、第16轮观测校准，其他轮每轮只做指定的一项机制。
-失败或无收益时保留可信incumbent，下一轮照顺序继续，不插入额外轮次或提前叠加。
+本次按OBJECTIVE内17份execution plan作为有序复现阶段，不把阶段编号绑死到outer轮号。
+每阶段最多3个连续outerloop，每轮最多5次inner，总上限51轮；阶段耗尽就停止累计链。
+自动baseline不占阶段完成数；阶段01控制、16观测校准，其他阶段一次只做指定机制。
+允许同阶段有证据的跨outer修复；不得换hypothesis名字重置机会或提前叠加后续项。
 serial multi-agent显式传
-`--outer-loop agent --inner-loop multi-agent --max-rounds 17 --max-retries-per-round 5`，
-不修改框架默认预算。逐轮hypothesis id须满足OBJECTIVE表中的类别与轮号前缀，
-外层监督映射，judge审查实际机制；不把id一致当成语义依从证明。
+`--outer-loop agent --inner-loop multi-agent --max-rounds 51 --max-retries-per-round 5`
+和`--max-measured-rounds 17 --max-unmeasured-rounds 3 --judge-every 1`。
+后两项是框架的可信测量计数与无测量退出限制，不替代语义阶段审核。
+逐轮hypothesis id须满足OBJECTIVE当前阶段的`pNN`前缀，框架轮号另记；
+外层监督阶段及正式gate对应关系，judge审查实际机制和激活，不能仅以id判定成功。
 不提供历史实现或成绩，所有候选都要经过本次严格精度与完整5 RPS正式测量。
-逐轮记录计划完成、失败重试、吞吐、保留决定及真实Token，控制复测不记优化收益。
+实现、正确性、性能分别报告；无收益不是实现失败，不得反复跑分择优。
+性能最佳incumbent和已正确实现的前置版本分别记录，允许显式选择后者作为下一阶段base。
+可按不变的lock恢复缺失运行依赖，不得把环境安装错误当作机制不可复现。
+逐阶段汇总所有尝试、纠错及失败的真实Token，并保留逐outer明细，未知用量不补零。

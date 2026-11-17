@@ -1,7 +1,8 @@
-# Qwen3-32B code-edit：17轮指引复现
+# Qwen3-32B code-edit：17阶段有界重试复现
 
 在 CodeEditorBench code-debug 工作负载上优化 Qwen/Qwen3-32B 的多请求服务能力。
-唯一性能目标是 benchmark JSON 的 **`max_throughput_tok_per_sec`**：
+本次目标是逐项检验给定trace方案的实现、正确性与性能可复现性，
+不是自由搜索最高分。唯一性能读数是 benchmark JSON 的 **`max_throughput_tok_per_sec`**：
 在单个 **5 req/s open-loop Poisson 到达负载**下，最大化
 `所有逻辑请求成功输出的总 token / 从首个计划到达到最后请求完成的墙钟秒`。
 不 sweep request rate。客户端不设并发上限、不等待响应再派发；
@@ -13,60 +14,84 @@
 
 先建立正确可测的 eager BF16 AR 服务基线。支持多请求、正确的请求级 KV 隔离
 和服务生命周期是工作负载基础要求，不可通过串行客户端伪造并发吞吐。
-先提名基线供框架正式 accuracy/benchmark，再提交优化候选；
-in-turn 自测不能代替 baseline/official receipts。如无收益，应保留可信 incumbent。
+启动前的正式baseline证明服务可测，第01阶段仍提交无生产变化的控制候选。
+不要求先有一个已通过的“第01轮候选”才允许准备环境或提名控制；
+in-turn自测不能代替正式receipts。无收益不强行替换可信incumbent。
 
-## 固定轮次合同
+## 有序阶段与尝试合同
 
-这是按给定 execution plan 顺序重做的独立实验，不是自主排序优化。
-必须按下列第01至17轮依次执行，框架提示中的 `round_number` 是唯一轮次来源。
-启动前框架自动测量的 baseline 不占第01轮；第01轮仍需完成控制提名及正式评测。
-inner重试、judge、局部验证和故障恢复不推进计划序号，也不重置任何预算。
-本轮结束时不得请求跨outerloop的`continue`。最迟最后一次inner回复须诚实报告
-完成、失败或受阻状态，并将`next_step`留空；未完成的修复建议写进证据或总结，
-不能借非空`next_step`申请下一outerloop继续旧假设、挤占下一份指引。
-每轮只执行该轮的一项方案；不能提前实现后续项、跳过某项或额外插入一轮，
-不能用“延续上一假设”代替本轮的新方案，也不能自主提前结束未完成的序列。
-即使早期项未完成，仍按下一轮指引尝试；必要前提缺失时如实报告受阻，不夹带补做其他项。
-同一类优化在多个指定轮出现是本次合同的要求，不适用“切走后永不重开”的自主阶段规则。
+以下17份方案按原trace顺序执行，但**方案编号不等于框架outerloop轮号**。
+阶段从01开始；只有当前方案的实现、激活、正确性与正式性能测量均完成才进入下一阶段。
+以框架已发布的轮次历史、judge结论和正式receipts重建进度，不以自报“done”推进。
+每阶段最多3个连续outerloop（包括首次），每个outerloop最多5次implementer机会，
+全程最多51个outerloop；inner、judge、schema纠错与恢复不额外推进阶段或重置预算。
+最多5次不是必须用满5次；所有实际调用和已消耗机会都如实记录。
 
-outerloop使用agent，inner使用multi-agent；严格17轮，每轮最多五次implementer机会。
-显式设置
-`--outer-loop agent --inner-loop multi-agent --max-rounds 17 --max-retries-per-round 5`。
-所有设计、实现及评审都应写明框架轮次、本轮计划标题与唯一机制，
-并按下列标识返回新的hypothesis id；允许追加描述后缀，不得改变规定前缀：
+一个outerloop只处理当前阶段的一项机制。未完成且还有阶段预算时，
+允许用`hypothesis_outcome=continue`、`implementation_failed`或`inconclusive`
+以及非空`next_step`申请下一outerloop继续同一机制；写清失败证据与具体修复。
+优先延续同一hypothesis及其工作中版本，不能换名字重置阶段的3轮累计上限。
+若框架已结束旧hypothesis，新design仍须选择本阶段，用同一规定前缀和不同后缀，
+从本run可访问的旧候选保留必要工作，仅修复已识别缺陷，不照抄原样失败任务。
+当前阶段测量完成后不再请求continue；新design才进入下一阶段。
+不得提前叠加后续机制、跳过阶段、在完成后自由优化，或为追求正收益重复跑分。
+同类机制可在多个指定阶段出现，不适用“切走后永不重开”的自主搜索规则。
 
-| 轮次 | hypothesis id前缀 | 本轮任务 |
+blocked不是“方案已完成”。环境缺失、启动或监控错误应显式报告并优先修复，
+仍归当前阶段、保留已消耗的outer/inner/token；没有完成测量就不能推进下一方案。
+按现有lock恢复缺失依赖、安装环境和修复启动是基础设施工作，不是更换生产依赖版本，
+也不是夹带新优化。不得把“保持依赖不变”解释为禁止安装原lock所需包。
+编辑容器的系统Python不等于生产依赖环境；本地导入、测试与launcher检查应使用
+`uv run --frozen python ...`，允许先`uv sync --frozen`。不得因裸`python`缺包就报告不可修复。
+编译/局部验证失败时先修复并重验，不把其当作性能负结果。
+阶段3轮耗尽仍未完成实现或正确性时，**停止整条累计复现链**，
+保留当前最佳可信版本和所有失败证据，后续阶段记未执行，不以缺前提结果冒充复现。
+
+outerloop使用agent，inner使用multi-agent。显式设置：
+`--outer-loop agent --inner-loop multi-agent --max-rounds 51 --max-retries-per-round 5`
+及`--max-measured-rounds 17 --max-unmeasured-rounds 3 --judge-every 1`。
+框架硬限制总轮数、inner机会、17个已评审且有可信指标的轮次后正常结束，
+以及连续3轮无此测量时失败退出；启动baseline不计入这17个测量轮。
+这些计数不自动理解方案语义：外层`guidance.audit`另外检查阶段顺序、阶段3轮上限、
+正式gate及轮次对应关系，judge审查源码和真实激活。不能仅凭id或自报成功推进。
+三个角色在已有`task`、`summary`、`evidence`或`analysis`文本中说明
+阶段编号、标题、框架outer轮号和本阶段第几次尝试，不添加schema之外的JSON字段。
+hypothesis id按下表前缀；后缀可自定，前缀中的`pNN`表示方案阶段，不表示outer轮号：
+
+| 阶段 | hypothesis id前缀 | 本阶段任务 |
 |---|---|---|
-| 01 | `baseline-r01-` | 服务控制测量 |
-| 02 | `continuous-batching-r02-` | Decode侧Continuous Batching |
-| 03 | `flashinfer-r03-` | FlashInfer分页Attention |
-| 04 | `flashinfer-r04-` | 实际存活工作区核算 |
-| 05 | `flashinfer-r05-` | 共享临时空间预算 |
-| 06 | `fusion-r06-` | 融合RMSNorm |
-| 07 | `fusion-r07-` | 融合RoPE |
-| 08 | `cuda-graph-r08-` | 精确活跃批大小CUDA Graph |
-| 09 | `prompt-ngram-r09-` | 原Prompt N-gram投机解码 |
-| 10 | `dynamic-batching-r10-` | 整段Prefill与Decode混合组批 |
-| 11 | `dynamic-batching-r11-` | 双Prefill共同分派 |
-| 12 | `prompt-ngram-r12-` | 已验证Prompt复制游标 |
-| 13 | `prompt-ngram-r13-` | 对齐Prompt的长候选验证 |
-| 14 | `cuda-graph-r14-` | 多Token验证CUDA Graph |
-| 15 | `fusion-r15-` | 合并MLP Gate/Up投影 |
-| 16 | `baseline-r16-` | 观测校准与平台期复测 |
-| 17 | `dynamic-batching-r17-` | 有Decode同行的Prefill切片 |
+| 01 | `baseline-p01-` | 服务控制测量 |
+| 02 | `continuous-batching-p02-` | Decode侧Continuous Batching |
+| 03 | `flashinfer-p03-` | FlashInfer分页Attention |
+| 04 | `flashinfer-p04-` | 实际存活工作区核算 |
+| 05 | `flashinfer-p05-` | 共享临时空间预算 |
+| 06 | `fusion-p06-` | 融合RMSNorm |
+| 07 | `fusion-p07-` | 融合RoPE |
+| 08 | `cuda-graph-p08-` | 精确活跃批大小CUDA Graph |
+| 09 | `prompt-ngram-p09-` | 原Prompt N-gram投机解码 |
+| 10 | `dynamic-batching-p10-` | 整段Prefill与Decode混合组批 |
+| 11 | `dynamic-batching-p11-` | 双Prefill共同分派 |
+| 12 | `prompt-ngram-p12-` | 已验证Prompt复制游标 |
+| 13 | `prompt-ngram-p13-` | 对齐Prompt的长候选验证 |
+| 14 | `cuda-graph-p14-` | 多Token验证CUDA Graph |
+| 15 | `fusion-p15-` | 合并MLP Gate/Up投影 |
+| 16 | `baseline-p16-` | 观测校准与平台期复测 |
+| 17 | `dynamic-batching-p17-` | 有Decode同行的Prefill切片 |
 
-第01与16轮是控制或诊断，不伪称性能优化。其他轮的收益未知，必须真实实现并评测，
+第01与16阶段是控制或诊断，不伪称性能优化。其他项的收益未知，必须真实实现并评测，
 不得从外部读取旧实验源码、成绩、trace或答案来复现结果。不能预设某轮必然成功或失败。
-每轮从当时可信incumbent继续，失败或无收益不强行叠加；在五次inner机会内修复，
-仍失败或无收益时保留原incumbent，明确记录后按下一轮指引继续。
-judge须审查本轮实际生产差异、机制激活与正确性，不能仅按hypothesis名字判定依从。
-外层会监督轮次及id前缀；语义依从仍需评审，不以自动分类代替源码核验。
+每阶段默认从当时可信incumbent开始；同阶段修复允许延续自己的工作中版本。
+若后续方案需要一个已正确实现但未提速的前置机制，应在本run已正式通过的候选中
+显式选择具备前提的base并说明原因，不能暗中补做、重放旧实验源码或删除前置机制。
+性能最佳版本与复现所需前置版本分别记录；正收益不是实现成功、judge放行或完成测量的门槛。
+judge的pass_criteria应检查指定机制、激活、正确性及可测性，不能用最低加速比阻断正式测量。
+候选是否值得替换性能incumbent是另一个决定；无收益也须报告完整测量结果。
 
-## 每轮execution plan
+## 各阶段execution plan
 
 以下只规定可迁移的机制与正确性边界，不指定实现文件、函数或既有代码结构。
-实现细节由agent按当前真实服务设计；每轮使用同一严格accuracy和完整5 RPS benchmark。
+以下“第NN轮”均指原trace的方案编号，对应本实验阶段NN，不是框架outer轮号。
+实现细节由agent按当前真实服务设计；每阶段使用同一严格accuracy和完整5 RPS benchmark。
 
 ### 第01轮：服务控制测量
 
@@ -170,15 +195,26 @@ judge须审查本轮实际生产差异、机制激活与正确性，不能仅按
 
 中间切片只追加连续KV并记录位置，不采样、不生成输出、不推进复制游标；最后切片才生成首token，随后进入decode。不得借切片释放的空间额外加请求或加宽候选。验证多请求切片交替、KV连续性、独立取消和最终输出，权衡新增forward及首token等待成本，用严格精度与完整服务吞吐决定保留。
 
-## 逐轮报告与保留
+## 阶段完成、报告与保留
 
-逐轮报告计划是否完成、inner次数、真实激活、accuracy及benchmark的正式receipt、
-入口incumbent与本轮候选吞吐、最终保留决定及容量/输出变化；不能只展示正结果。
-控制和诊断轮不记新增优化收益，无收益轮不替换更优incumbent。
-第17轮结束后采用本次实验内真实测量且精度通过的最佳可信版本，禁止额外自由优化轮。
-全部17轮都应报告实际状态，受阻或耗尽机会也占对应轮次，不能改号补跑。
-同负载、设备、存储的新测量用于比较；不读取或复用历史实验成绩。
-这些是累计服务上的逐轮改进，不是17项彼此独立的消融或统计显著性结论。
+阶段完成须同时具有：指定机制的生产实现与真实激活证据、judge认可、
+同revision正式accuracy通过和完整5 RPS benchmark结果。局部自测、只有编译通过、
+只有正确的hypothesis前缀或只有一个吞吐数字均不足。
+一旦这些证据齐备就推进阶段，不能因未提速继续消耗阶段余下outerloop。
+只有实现/正确性未完成、明确基础设施故障或正式测量无效时才修复重试；不得择优跑分。
+
+每阶段独立报告三条结论：实现是否复现、正确性是否通过、性能读数及相对入口的变化。
+没有预先给Agent历史分数或容差，Agent不得自称性能“与历史一致”；
+operator在外部用历史trace另作比较，包含环境、容量、累计前提差异与统计局限。
+实现正确但吞吐下降仍是已完成的复现实验，不能记为实现失败或抹去负结果。
+控制/诊断不要求提速；不得把重复控制测量波动写成优化收益。
+
+每次outer尝试记录阶段、hypothesis、outer轮号、inner次数、失败分类、base与候选revision、
+激活证据、正式receipts、吞吐、最终保留决定、容量及输出变化，不只展示正结果。
+17阶段完成后框架正常结束并采用本run真实测量、精度通过的最佳可信版本。
+阶段耗尽、环境或监控中断与完整复现成功分别报告；未执行阶段不能标完成。
+不读取或复用历史实现及成绩；这些是累计服务的方案复现，不是17项独立消融，
+也不以单次benchmark宣称统计显著性或全局最大吞吐。
 
 ## 输入与精度
 
@@ -201,8 +237,9 @@ judge须审查本轮实际生产差异、机制激活与正确性，不能仅按
 
 ## 优化身份与 token 记录
 
-每轮hypothesis id必须符合固定轮次表，不得将第16轮诊断误归为新的性能机制。
-逐轮报告计划标题、具体改进、重试次数、正式测量和保留决定，
+每轮hypothesis id必须符合当前阶段表，不得将第16阶段诊断误归为新的性能机制。
+逐阶段汇总所有outer/inner/纠错/失败及恢复调用，同时保留逐outer尝试明细，不按轮号猜阶段。
+报告计划标题、具体改进、重试次数、正式测量和保留决定，
 便于operator按真实调用集合核算每个具体实现，而非只按优化大类合并。
 token 由外层从 CLI 实际用量统计，不由 agent 猜测；输入、输出、缓存、
 reasoning 和各角色分列，重试也计入当前项，缺失统计不能当作零。
