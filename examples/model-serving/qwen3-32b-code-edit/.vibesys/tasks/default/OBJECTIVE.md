@@ -12,41 +12,11 @@
 退避、失败尝试和尾部排空均计入墙钟；仅最终成功输出计一次 token。
 总完成期限内仍有失败或客户端发压滞后则整次评测失败，不得丢弃困难请求抬高成绩。
 
-原始复现链先建立正确可测的 eager BF16 AR 服务基线。支持多请求、正确的请求级 KV 隔离
+先建立正确可测的 eager BF16 AR 服务基线。支持多请求、正确的请求级 KV 隔离
 和服务生命周期是工作负载基础要求，不可通过串行客户端伪造并发吞吐。
-启动前的正式baseline证明服务可测，第01阶段提交无生产变化的控制候选。
+启动前的正式baseline证明服务可测，第01阶段仍提交无生产变化的控制候选。
 不要求先有一个已通过的“第01轮候选”才允许准备环境或提名控制；
 in-turn自测不能代替正式receipts。无收益不强行替换可信incumbent。
-
-## 本次执行是第03阶段起的关联恢复
-
-先读取本项目`recovery/accepted-stages.json`及`recovery/unfinished-stage03.json`。
-它们只来自本复现链先前执行`39ca728b-b756-441d-a296-11ecb71bb6d7`，
-不是原trace的历史实现或未来成绩。阶段01和02已完成judge、
-同revision正式accuracy与完整5 RPS benchmark；本次直接继承这些事实，
-**从阶段03 FlashInfer分页Attention开始，不再执行阶段01或02的优化/控制任务**。
-项目生产输入就是已通过的阶段02候选
-`77d6bfd32850d1acdda793ebc7e998cc5f8e8ec9`的原始生产字节。
-框架会对该输入建立本执行的startup baseline；这是跨执行恢复的重新验证，
-不是重新进行阶段01/02，也不计作剩余15个阶段之一。
-
-旧执行第三个outer已进入阶段03 implementer，因外部归档故障中断，
-没有通过的阶段03候选或正式测量；不能算机制失败、完成或免费尝试。
-该outer和其中一次implementer调用已消耗，Token用量缺失保持未知，不能补零。
-阶段03剩余最多**2个outer**，之后每阶段仍最多3个outer，每outer最多5次inner。
-本执行最多48个outer，与之前已开始的3个合计仍不超过51。
-本执行local outer 1对应全链第4个已开始的outer、阶段03第2次尝试；
-在已有文本字段同时写清local轮号、全链轮号和阶段尝试，不能混用。
-不要求取回中断CLI会话，不以相同调用id盲目重发。可复用本链中断前的设计，
-但没有保留为候选revision的改动不能冒充已实现源码，必须实际实现和验证。
-
-本次启动硬限制为：
-`--outer-loop agent --inner-loop multi-agent --max-rounds 48 --max-retries-per-round 5`
-及`--max-measured-rounds 15 --max-unmeasured-rounds 3 --initial-unmeasured-rounds 1 --judge-every 1`。
-初始已消耗的无测量轮credit确保阶段03再失败两轮就停止，
-第一次可信阶段测量后清零，后续阶段恢复各自最多3轮。
-全部17份方案正文仍是全链合同，以下“阶段从01开始”及51/17上限描述原始整条链；
-本次执行入口、剩余额度和继承事实以本节为准。
 
 ## 有序阶段与尝试合同
 
@@ -77,12 +47,12 @@ blocked不是“方案已完成”。环境缺失、启动或监控错误应显�
 阶段3轮耗尽仍未完成实现或正确性时，**停止整条累计复现链**，
 保留当前最佳可信版本和所有失败证据，后续阶段记未执行，不以缺前提结果冒充复现。
 
-原始整链outerloop使用agent，inner使用multi-agent。无恢复credit时显式设置：
+outerloop使用agent，inner使用multi-agent。显式设置：
 `--outer-loop agent --inner-loop multi-agent --max-rounds 51 --max-retries-per-round 5`
 及`--max-measured-rounds 17 --max-unmeasured-rounds 3 --judge-every 1`。
 框架硬限制总轮数、inner机会、17个已评审且有可信指标的轮次后正常结束，
 以及连续3轮无此测量时失败退出；启动baseline不计入这17个测量轮。
-这些计数不自动理解方案语义：外层`guidance.audit`另外检查阶段顺序、阶段3轮上限、
+这些计数不自动理解方案语义：外部监督Agent直接检查阶段顺序、阶段3轮上限、
 正式gate及轮次对应关系，judge审查源码和真实激活。不能仅凭id或自报成功推进。
 三个角色在已有`task`、`summary`、`evidence`或`analysis`文本中说明
 阶段编号、标题、框架outer轮号和本阶段第几次尝试，不添加schema之外的JSON字段。
@@ -109,9 +79,7 @@ hypothesis id按下表前缀；后缀可自定，前缀中的`pNN`表示方案�
 | 17 | `dynamic-batching-p17-` | 有Decode同行的Prefill切片 |
 
 第01与16阶段是控制或诊断，不伪称性能优化。其他项的收益未知，必须真实实现并评测，
-不得从外部读取原trace实验源码、成绩、trace或答案来复现结果。
-仅本节允许的同一复现链恢复证据不在此禁令内；不得据此读取阶段03之后的历史实现。
-不能预设某轮必然成功或失败。
+不得从外部读取旧实验源码、成绩、trace或答案来复现结果。不能预设某轮必然成功或失败。
 每阶段默认从当时可信incumbent开始；同阶段修复允许延续自己的工作中版本。
 若后续方案需要一个已正确实现但未提速的前置机制，应在本run已正式通过的候选中
 显式选择具备前提的base并说明原因，不能暗中补做、重放旧实验源码或删除前置机制。
