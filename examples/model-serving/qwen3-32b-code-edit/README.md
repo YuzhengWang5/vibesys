@@ -37,19 +37,15 @@ accuracy 保留已校准的 HF BF16 teacher-forced gate：54 个位置，
 每阶段最多3个连续outerloop，每轮最多5次inner，总上限51轮；阶段耗尽就停止累计链。
 自动baseline不占阶段完成数；阶段01控制、16观测校准，其他阶段一次只做指定机制。
 允许同阶段有证据的跨outer修复；不得换hypothesis名字重置机会或提前叠加后续项。
-原始整链serial multi-agent显式传
+本次整链serial multi-agent显式传
 `--outer-loop agent --inner-loop multi-agent --max-rounds 51 --max-retries-per-round 5`
 和`--max-measured-rounds 17 --max-unmeasured-rounds 3 --judge-every 1`。
-当前分支的关联恢复从阶段03开始，继承本链已通过的阶段01/02候选和收据，
-不重做这两项优化。启动用`--max-rounds 48 --max-measured-rounds 15`
-以及`--max-unmeasured-rounds 3 --initial-unmeasured-rounds 1`；
-其余仍为5 inner及每轮judge。旧第三outer已消耗，阶段03剩2 outer，
-成功正式测量后后续各阶段仍各有3 outer；预算不因恢复而重置。
-具体输入身份与恢复证据约定见OBJECTIVE的恢复节。
-后两项是框架的可信测量计数与无测量退出限制，不替代语义阶段审核。
+初始已消耗轮数为0，从新的eager BF16输入及阶段01开始，全部17个阶段在本次执行中完成。
+可信测量计数与无测量退出限制不替代语义阶段审核。
 逐轮hypothesis id须满足OBJECTIVE当前阶段的`pNN`前缀，框架轮号另记；
 外层监督阶段及正式gate对应关系，judge审查实际机制和激活，不能仅以id判定成功。
-不提供原trace历史实现或成绩；允许读取本复现链自身先前执行的明确恢复证据。
+不从其他实验导入候选、收据、成绩、trace、实现源码或会话。
+只能使用本次执行实际产生并正式验证的候选及证据推进阶段。
 所有新候选都要经过本次严格精度与完整5 RPS正式测量。
 实现、正确性、性能分别报告；无收益不是实现失败，不得反复跑分择优。
 性能最佳incumbent和已正确实现的前置版本分别记录，允许显式选择后者作为下一阶段base。
