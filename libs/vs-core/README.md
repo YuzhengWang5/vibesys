@@ -58,6 +58,14 @@ shell executes the durable request selected by that event's `request_id`, not a
 newly emitted copy. A prepared proposal alone does not authorize I/O; recovery
 and bounded retries retain the recorded request identity.
 
+A forced local timeout while closing preserves its failed disposition and
+original failure. It is not proof of the executor's outcome. A later conclusive
+answer may add acceptance, resource identity and complete release evidence,
+including when the effect succeeded after its bound. Existing acceptance and
+resource bindings cannot be reversed. Partial success does not prove release,
+and contradictory executor-reported terminal outcomes remain typed errors.
+Duplicate release proofs and recovery never turn the local failure into success.
+
 Pause and resume cannot reverse closing or blocked runs, or a committed stop
 result. While a run is paused core takes only a `Finish` or a `Withdraw`; the
 shell holds every other decision the search makes (`deferred`) and submits it on

@@ -34,6 +34,7 @@ from ._proofs import (
     fresh_observation,
     observation_for,
     released_owner,
+    resolved_observation,
 )
 from ._registry import ClosedRecordContradictionError, ContractError
 from ._request_forward import declaration, owner_signals, records_own
@@ -507,9 +508,10 @@ def _refine(
     """A closed record only gains evidence: release facts and children. Its disposition stands.
 
     A later answer that agrees with the disposition (see `_agrees`) adds what it proves: a
-    request core failed when the run closed around it may later be inspected, and the executor's
-    "never started" proves it released. A record's release facts never go back. An answer that
-    contradicts the disposition is a typed `ClosedRecordContradictionError`.
+    request core failed when the run closed around it may later prove it released, even if the
+    effect succeeded after its bound. This does not replace the local failure. A record's
+    ownership and release facts never go back. An answer contradicting an executor's actual
+    disposition is a typed `ClosedRecordContradictionError`.
     """
     previous = record.observation
     if (
@@ -526,7 +528,10 @@ def _refine(
     added = tuple(child for child in observation.children if child not in previous.children)
     released = observation.released and not previous.released
     complete = observation.children_complete and not previous.children_complete
-    if not (added or released or complete):
+    identified = (observation.accepted and not previous.accepted) or (
+        previous.resource_id is None and observation.resource_id is not None
+    )
+    if not (added or released or complete or identified):
         # Owners hold the record's observation as their proof; an answer that proves
         # nothing new leaves it, and them, as they are.
         return AreaChange(state=state)
@@ -535,6 +540,8 @@ def _refine(
             "event_id": observation.event_id,
             "sequence": observation.sequence,
             "observed_at": observation.observed_at,
+            "accepted": previous.accepted or observation.accepted,
+            "resource_id": previous.resource_id or observation.resource_id,
             "released": previous.released or released,
             "children": (*previous.children, *added),
             "children_complete": previous.children_complete or complete,
@@ -594,8 +601,13 @@ def _agrees(closed: Observation, later: Observation) -> bool:
     success agrees only with a success; an answer that says the request did not succeed
     (failed, rejected, cancelled) agrees with any other such answer, since each only says
     how it did not succeed. A pending answer says the request is still running, which no
-    closed record allows.
+    closed record allows. A local timeout is not an executor outcome: a conclusive release
+    may identify its resource and acceptance, but cannot undo either fact already known.
     """
+    if closed.diagnostic == _BLOCKED_AT_CLOSE and isinstance(resolved_observation(later), Proven):
+        return (not closed.accepted or later.accepted) and (
+            closed.resource_id is None or later.resource_id == closed.resource_id
+        )
     return (
         later.accepted == closed.accepted
         and later.resource_id == closed.resource_id

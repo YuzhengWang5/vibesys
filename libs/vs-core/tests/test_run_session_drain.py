@@ -280,6 +280,13 @@ def test_cleanup_timeouts_do_not_answer_an_accepted_finish(
     assert expired.state.run.result == result
     assert expired.state.run.status == core.RunStatus.CLOSING
     assert any(isinstance(request, core.InspectRequest) for request in expired.requests)
+    executor.state = reload(expired.state)
+    for request in closing:
+        executor.answer(request, core.ObservationStatus.SUCCEEDED, twice=True)
+    _settle(executor)
+    assert executor.state.run.result == result
+    assert executor.state.run.status == core.RunStatus.TERMINAL
+    assert all(row.phase == core.SessionPhase.TERMINAL for row in executor.state.sessions.sessions)
 
 
 @settings(max_examples=examples(pr=3, nightly=300), deadline=None)

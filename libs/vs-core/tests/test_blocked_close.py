@@ -352,9 +352,10 @@ def test_a_later_answer_for_a_record_the_close_ended_proves_its_release_or_is_ty
 
     An answer that does not contradict the failure (it did not succeed, or the executor cannot
     tell, with the same acceptance) adds the release facts it proves and leaves the failure as
-    it was. An executor that cannot tell and holds no record of the request (unknown,
-    unaccepted) proves nothing, so the record stays as it was. Any other answer raises the
-    typed contradiction, never a bare contract error.
+    it was. A fully released success also refines a local timeout, which proves nothing
+    about the executor's outcome. An executor that cannot tell and holds no record of the
+    request (unknown, unaccepted) proves nothing. Other conflicting answers raise the typed
+    contradiction, never a bare contract error.
     """
     state = _record(
         core.LifecycleClass.IDEMPOTENT_WRITE, _SILENT_ANSWERS[0], accepted=True, named=False
@@ -378,7 +379,13 @@ def test_a_later_answer_for_a_record_the_close_ended_proves_its_release_or_is_ty
     if unknown and not later.accepted:
         assert _original(core.step(run, core.RequestObserved(observation=answer)).state) == closed
         return
-    agrees = later.accepted and (unknown or later.status in _DID_NOT_SUCCEED)
+    released_success = (
+        later.status == core.ObservationStatus.SUCCEEDED
+        and later.terminal
+        and later.released
+        and later.children_complete
+    )
+    agrees = later.accepted and (unknown or later.status in _DID_NOT_SUCCEED or released_success)
     if not agrees:
         with pytest.raises(core.ClosedRecordContradictionError):
             core.step(run, core.RequestObserved(observation=answer))
@@ -390,6 +397,91 @@ def test_a_later_answer_for_a_record_the_close_ended_proves_its_release_or_is_ty
     assert record.observation.diagnostic == ended.diagnostic
     assert record.observation.released == later.released
     assert record.observation.children_complete == later.children_complete
+
+
+def test_an_executor_failure_is_not_rewritten_by_a_later_released_success() -> None:
+    state = _record(
+        core.LifecycleClass.IDEMPOTENT_WRITE, _SILENT_ANSWERS[0], accepted=True, named=False
+    )
+    previous = _original(state).observation
+    assert previous is not None
+    failed = previous.model_copy(
+        update={
+            "event_id": core.EventId(root="executor:failed"),
+            "sequence": 1,
+            "status": core.ObservationStatus.FAILED,
+            "terminal": True,
+            "diagnostic": "executor reported failure",
+        }
+    )
+    closed = core.step(state, core.RequestObserved(observation=failed)).state
+    assert _original(closed).phase == core.RequestPhase.COMPLETED
+    later = failed.model_copy(
+        update={
+            "event_id": core.EventId(root="executor:contradiction"),
+            "sequence": 2,
+            "status": core.ObservationStatus.SUCCEEDED,
+            "released": True,
+            "children_complete": True,
+        }
+    )
+    with pytest.raises(core.ClosedRecordContradictionError):
+        core.step(closed, core.RequestObserved(observation=later))
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(
+    accepted=st.booleans(),
+    named=st.booleans(),
+    terminal=st.booleans(),
+    released=st.booleans(),
+    complete=st.booleans(),
+)
+def test_a_late_success_only_refines_a_local_timeout_with_complete_release_proof(
+    *, accepted: bool, named: bool, terminal: bool, released: bool, complete: bool
+) -> None:
+    state = _record(
+        core.LifecycleClass.IDEMPOTENT_WRITE, _SILENT_ANSWERS[0], accepted=accepted, named=False
+    )
+    if not accepted:
+        unanswered = _original(state).model_copy(update={"observation": None, "sequence": None})
+        state = state.model_copy(
+            update={"records": state.records.model_copy(update={"records": (unanswered,)})}
+        )
+    closed = _close_after(state, restart=False, late_by=1.0, stop_first=True)
+    original = _original(closed)
+    assert original.phase == core.RequestPhase.COMPLETED
+    assert original.observation is not None
+    resource = core.ResourceId(root="late-resource") if named else None
+    answer = original.observation.model_copy(
+        update={
+            "event_id": core.EventId(root="executor:late-success"),
+            "sequence": 0,
+            "status": core.ObservationStatus.SUCCEEDED,
+            "accepted": True,
+            "resource_id": resource,
+            "terminal": terminal,
+            "released": released,
+            "children_complete": complete,
+            "diagnostic": "",
+        }
+    )
+    event = core.RequestObserved(observation=answer)
+    if not (terminal and released and complete):
+        with pytest.raises(core.ClosedRecordContradictionError):
+            core.step(closed, event)
+        return
+    observed = core.step(closed, event).state
+    refined = _original(observed)
+    assert refined.failure == original.failure
+    assert refined.observation is not None
+    assert refined.observation.status == core.ObservationStatus.FAILED
+    assert refined.observation.accepted
+    assert refined.observation.resource_id == resource
+    assert refined.observation.released
+    assert refined.observation.children_complete
+    restored = core.CoreState.model_validate_json(observed.model_dump_json())
+    assert _original(core.step(restored, event).state) == refined
 
 
 @pytest.mark.parametrize("answered_before_deadline", [False, True])
