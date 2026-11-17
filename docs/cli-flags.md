@@ -80,6 +80,16 @@ strategy-neutral `round_finished.data.attempts` field currently reports `1`
 for a projected dynamic round and must not be read as its implementer-turn
 count.
 
+For serial multi-agent loops, two optional limits bound reproduction work:
+`--max-measured-rounds N` finishes normally after N reviewed rounds with trusted
+metrics, whether or not they improved throughput. The automatic input measurement
+does not count. `--max-unmeasured-rounds N` fails after N consecutive counted rounds
+without such a measurement; a trusted measurement resets that counter. Both are
+unset by default and do not change the overall `--max-rounds` upper bound.
+They count round evidence, not semantic plan completion: an operator replay audit
+must still verify plan order, activation, correctness and receipt identity.
+Other loop types reject these flags.
+
 Each recorded dynamic round produces one `round_finished` and one
 `workstream_finished` event. Both carry the same non-null envelope
 `round_label` (`round-N`), so consumers correlate the pair by `(run_id,

@@ -238,6 +238,17 @@ def _validate_plain(args: argparse.Namespace) -> None:
 def _agent_policy_descriptor(
     args: argparse.Namespace, bundle: InputBundle
 ) -> OrchestrationDescriptor:
+    measurement_limits = {
+        key: value
+        for key in ("max_measured_rounds", "max_unmeasured_rounds")
+        if (value := getattr(args, key, None)) is not None
+    }
+    if measurement_limits and (args.outer_loop == "dynamic" or args.inner_loop != "multi-agent"):
+        _configuration_error(
+            "--max-measured-rounds and --max-unmeasured-rounds require a serial multi-agent loop.",
+            code="invalid_arguments",
+            stage="argument_parsing",
+        )
     if args.outer_loop == "dynamic":
         orchestration_id = "dynamic"
     elif args.outer_loop == "agent":
@@ -287,6 +298,7 @@ def _agent_policy_descriptor(
             "max_rounds": args.max_rounds,
             "max_retries_per_round": args.max_retries_per_round,
             **({"judge_every": args.judge_every} if args.inner_loop == "multi-agent" else {}),
+            **measurement_limits,
         }
     return OrchestrationDescriptor(id=orchestration_id, config_version=1, options=options)
 
