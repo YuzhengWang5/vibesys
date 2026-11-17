@@ -25,7 +25,8 @@ async def multi(ctx: Flow, config: MultiConfig) -> NoWinner | None:
     ctx.fall_back_to_input(adoption_label(INPUT, None, None))
     run = SerialRun(config.hypotheses, ctx.facts.baseline, ctx.task.terms, await measure_input(ctx))
     ctx.fall_back_to_input(run.leading()[1])
-    measured = unmeasured = 0
+    measured = 0
+    unmeasured = config.initial_unmeasured_rounds
     async with ctx.group(limit=1) as rounds:
         while not run.over(stopping=ctx.stop_requested):
             if config.max_measured_rounds is not None and measured >= config.max_measured_rounds:

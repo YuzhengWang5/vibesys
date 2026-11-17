@@ -672,6 +672,13 @@ def _build_agent_parser() -> _RunArgumentParser:
         help="Multi-agent only: finish after N reviewed rounds with trusted metrics, not N gains.",
     )
     parser.add_argument(
+        "--initial-unmeasured-rounds",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Multi-agent only: carry N consumed unmeasured rounds into a linked recovery.",
+    )
+    parser.add_argument(
         "--max-unmeasured-rounds",
         type=int,
         default=None,
