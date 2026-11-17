@@ -167,6 +167,75 @@ def test_a_blocked_implementer_ends_the_round_and_nothing_is_adopted(*, restarti
 
 
 @MODES
+@pytest.mark.parametrize("throughput", [25.0, 100.0])
+def test_measured_budget_finishes_before_another_design_without_requiring_gain(
+    *, restarting: bool, throughput: float
+) -> None:
+    host = start(
+        config(max_rounds=5, max_measured_rounds=1),
+        restarting=restarting,
+        throughputs={"def456": throughput},
+    )
+    design(host)
+    implement(host)
+    judge(host, passed=True)
+    host.drain()
+
+    assert host.run.finished is not None
+    assert host.record is not None
+    assert len(host.record.rounds) == 1
+    assert_flow_closed(host)
+
+
+@MODES
+@pytest.mark.parametrize("max_rounds", [3, 5])
+def test_consecutive_unmeasured_budget_stops_even_when_the_input_is_trusted(
+    *, restarting: bool, max_rounds: int
+) -> None:
+    host = start(
+        config(max_rounds=max_rounds, max_unmeasured_rounds=3),
+        restarting=restarting,
+    )
+    design(host)
+    for _ in range(3):
+        host.drain_until_turn(IMPLEMENTER)
+        host.run.reply(host.run.expect_turn(role=IMPLEMENTER), implemented("blocked"))
+    host.drain()
+
+    assert host.run.finished is not None
+    assert host.record is not None
+    assert len(host.record.rounds) == 3
+    assert host.run.finished.result.outcome == "failure"
+    assert "unmeasured round budget exhausted" in host.run.finished.result.reason
+    assert_flow_closed(host)
+
+
+@MODES
+def test_a_trusted_measurement_resets_the_consecutive_unmeasured_budget(
+    *, restarting: bool
+) -> None:
+    host = start(
+        config(max_rounds=6, max_measured_rounds=2, max_unmeasured_rounds=2),
+        restarting=restarting,
+    )
+    for number in range(2):
+        design(host, f"h{number}")
+        host.drain_until_turn(IMPLEMENTER)
+        host.run.reply(host.run.expect_turn(role=IMPLEMENTER), implemented("blocked"))
+        implement(host, candidate=f"candidate-{number}")
+        judge(host, passed=True)
+        if number == 0:
+            host.drain_until_turn(PLANNER)
+    host.drain()
+
+    assert host.run.finished is not None
+    assert host.run.finished.result.outcome == "success"
+    assert host.record is not None
+    assert len(host.record.rounds) == 4
+    assert_flow_closed(host)
+
+
+@MODES
 @settings(max_examples=examples(pr=8, nightly=100))
 @given(
     execution_seconds=st.integers(min_value=301, max_value=3600),

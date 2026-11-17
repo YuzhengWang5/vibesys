@@ -24,6 +24,10 @@ class MultiConfig(Value):
 
     max_rounds: Positive
     """Rounds of agent work: each opens one candidate workspace."""
+    max_measured_rounds: Positive | None = None
+    """Finish after this many reviewed rounds with trusted metrics, regardless of gain."""
+    max_unmeasured_rounds: Positive | None = None
+    """Fail after this many consecutive rounds without a reviewed trusted measurement."""
     max_retries_per_round: Positive = 1
     """Paid implementer turns of one round, which is also the workspace's paid-turn limit."""
     judge_every: Positive = 1

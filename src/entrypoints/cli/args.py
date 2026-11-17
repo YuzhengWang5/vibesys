@@ -665,6 +665,20 @@ def _build_agent_parser() -> _RunArgumentParser:
         ),
     )
     parser.add_argument(
+        "--max-measured-rounds",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Multi-agent only: finish after N reviewed rounds with trusted metrics, not N gains.",
+    )
+    parser.add_argument(
+        "--max-unmeasured-rounds",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Multi-agent only: fail after N consecutive rounds without a trusted measurement.",
+    )
+    parser.add_argument(
         "--max-retries-per-round",
         type=int,
         default=_MAX_RETRIES_PER_ROUND_DEFAULT,
