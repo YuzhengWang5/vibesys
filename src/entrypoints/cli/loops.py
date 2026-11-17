@@ -240,12 +240,16 @@ def _agent_policy_descriptor(
 ) -> OrchestrationDescriptor:
     measurement_limits = {
         key: value
-        for key in ("max_measured_rounds", "max_unmeasured_rounds")
+        for key in (
+            "max_measured_rounds",
+            "max_unmeasured_rounds",
+            "initial_unmeasured_rounds",
+        )
         if (value := getattr(args, key, None)) is not None
     }
     if measurement_limits and (args.outer_loop == "dynamic" or args.inner_loop != "multi-agent"):
         _configuration_error(
-            "--max-measured-rounds and --max-unmeasured-rounds require a serial multi-agent loop.",
+            "Measured/unmeasured round limits require a serial multi-agent loop.",
             code="invalid_arguments",
             stage="argument_parsing",
         )

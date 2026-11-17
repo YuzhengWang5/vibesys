@@ -211,11 +211,39 @@ def test_consecutive_unmeasured_budget_stops_even_when_the_input_is_trusted(
 
 
 @MODES
-def test_a_trusted_measurement_resets_the_consecutive_unmeasured_budget(
-    *, restarting: bool
+@pytest.mark.parametrize("consumed", [0, 1, 2])
+def test_linked_recovery_preserves_consumed_unmeasured_rounds(
+    *, restarting: bool, consumed: int
 ) -> None:
     host = start(
-        config(max_rounds=6, max_measured_rounds=2, max_unmeasured_rounds=2),
+        config(max_rounds=5, max_unmeasured_rounds=3, initial_unmeasured_rounds=consumed),
+        restarting=restarting,
+    )
+    design(host)
+    for _ in range(3 - consumed):
+        host.drain_until_turn(IMPLEMENTER)
+        host.run.reply(host.run.expect_turn(role=IMPLEMENTER), implemented("blocked"))
+    host.drain()
+
+    assert host.run.finished is not None
+    assert host.record is not None
+    assert len(host.record.rounds) == 3 - consumed
+    assert host.run.finished.result.outcome == "failure"
+    assert_flow_closed(host)
+
+
+@MODES
+@pytest.mark.parametrize("consumed", [0, 1])
+def test_a_trusted_measurement_resets_the_consecutive_unmeasured_budget(
+    *, restarting: bool, consumed: int
+) -> None:
+    host = start(
+        config(
+            max_rounds=6,
+            max_measured_rounds=2,
+            max_unmeasured_rounds=2 + consumed,
+            initial_unmeasured_rounds=consumed,
+        ),
         restarting=restarting,
     )
     for number in range(2):

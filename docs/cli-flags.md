@@ -86,6 +86,12 @@ metrics, whether or not they improved throughput. The automatic input measuremen
 does not count. `--max-unmeasured-rounds N` fails after N consecutive counted rounds
 without such a measurement; a trusted measurement resets that counter. Both are
 unset by default and do not change the overall `--max-rounds` upper bound.
+`--initial-unmeasured-rounds N` carries already consumed consecutive rounds into
+a linked new execution (default 0); those consume the unmeasured limit until the
+first trusted measurement resets it. It does not import history, authorize replay
+of an unknown call, or count as new measured evidence. Operators must retain the
+prior execution's provenance, costs and separately subtract its consumed rounds
+from the new total-round budget.
 They count round evidence, not semantic plan completion: an operator replay audit
 must still verify plan order, activation, correctness and receipt identity.
 Other loop types reject these flags.
