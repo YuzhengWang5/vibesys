@@ -36,8 +36,8 @@ reasoning 加回；bridge 必须先减去这个子集，避免重复计数。
 v3 旧实验保留原始事件，并在其独立 operator 投影中减去一次额外 fold，
 不能将旧框架 output 总数直接冒充官方 CLI 输出总数。
 
-中断恢复使用 agentshim `0.18.4+vibesys5`
-（`ac9b5bfda789f88d48b27eedbc2c650ab48e3478`）：
+中断恢复及可选reasoning字段兼容使用 agentshim `0.18.4+vibesys7`
+（`b2a48f176beb1e783c92e1d150d6faafb185b104`）：
 bridge在调用过程中持久保存已观察用量和原始证据，不再只在正常退出后写checkpoint。
 operator镜像中的bridge与宿主安装的agentshim parser必须一同更新并分别记录pin。
 恢复只能使用同会话、有真实计数及明确边界的checkpoint；
@@ -47,6 +47,11 @@ operator镜像中的bridge与宿主安装的agentshim parser必须一同更新�
 容器HOME不是永久归档：运行容器删除后不能保证内部raw证据仍可读，
 不能仅因写过checkpoint就宣称实验已完整封账。
 此修复不扩大角色或CLI时限、不重开已终态run，也不免除失败尝试费用。
+API明确报告`outputTokens=0`时，缺失reasoning子集只能为0；正输出时不套用此规则。
+final文件缺reasoning时，仅可由完整、hash限定的同会话journal恢复：
+API收据唯一且连续、主计数与调用数全部匹配，才能使用实际收据中的reasoning合计。
+原始final文件保持原样，恢复来源单独记录；缺少证明、计数矛盾或不完整收据仍失败。
+依赖回归和已保存真实记录的离线回放不调用模型，不能代替下一次科学实验的成功证据。
 
 ## 外层监控
 

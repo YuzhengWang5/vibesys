@@ -136,14 +136,20 @@ The isolated dependency worktree avoids hot-editing ongoing v3 experiments.
 This is a compatibility rebuild,
 not the original dependency commit; experiment records must pin it separately.
 
-The interruption-accounting update is `0.18.4+vibesys5`, checkpoint
-`ac9b5bfda789f88d48b27eedbc2c650ab48e3478` in the same dependency checkout.
+The interruption-accounting update is `0.18.4+vibesys7`, checkpoint
+`b2a48f176beb1e783c92e1d150d6faafb185b104` in the same dependency checkout.
 It preserves observed Copilot usage during a turn and validates checkpoints
 before resuming. Install its parser together with the operator image's bridge.
 Partial counters are evidence, not settled per-turn totals: the neutral usage
 contract leaves counters absent when `increment_known` is false. Missing or
 unreconciled checkpoints still fail closed. This changes neither role deadlines
 nor the rule that a terminal run cannot resume.
+An omitted reasoning subset is exactly zero only when its API output total is
+explicitly zero. A missing final reasoning total requires complete, hash-bounded
+same-session journal proof, with unique contiguous receipts and matching primary
+totals and call counts. Original finals remain unchanged; recovery provenance is
+stored separately. Without this proof, missing positive-output reasoning still
+fails closed rather than becoming an assumed zero.
 
 Every Copilot turn excludes `session_store_sql`, `store_memory`, and
 `vote_memory` through agentshim's typed tool-exclusion contract, including
