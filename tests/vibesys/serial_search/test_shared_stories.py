@@ -22,6 +22,7 @@ from tests.vibesys.vibesys_flows import across_restarts
 
 from vs_core.api import (
     CaptureCommandBase,
+    FailureReason,
     Finish,
     Operation,
     RequestTurn,
@@ -29,6 +30,7 @@ from vs_core.api import (
     RevisionRef,
     Settle,
     StartAttempt,
+    TurnFailureKind,
     Wait,
     Withdraw,
     WorkspaceMode,
@@ -127,6 +129,34 @@ def test_a_designer_that_never_gives_a_valid_plan_ends_the_run_without_a_round(
     assert isinstance(finish, Finish)
     assert finish.result.outcome == "failure"
     assert "designer" in finish.result.reason
+
+
+@SEARCHES
+@MODES
+@pytest.mark.parametrize("reason", [FailureReason.TURN_FAILED, FailureReason.TIMED_OUT])
+def test_a_failed_designer_after_a_measured_candidate_does_not_report_success(
+    *, search: str, restarting: bool, reason: FailureReason
+) -> None:
+    host = start(search, restarting=restarting, config={"max_rounds": 2})
+    design(host, "h1")
+    implement(host, search, "c1")
+    host.drain_until_turn(PLANNER)
+    host.run.fail(
+        host.run.expect_turn(role=PLANNER),
+        reason,
+        **(
+            {"turn_failure": TurnFailureKind.PROVIDER_FAILED}
+            if reason is FailureReason.TURN_FAILED
+            else {}
+        ),
+    )
+    host.drain(limit=100)
+
+    finish = host.run.finished
+    assert isinstance(finish, Finish)
+    assert finish.result.outcome == "failure"
+    assert "designer" in finish.result.reason
+    assert_flow_closed(host)
 
 
 @SEARCHES

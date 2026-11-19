@@ -251,9 +251,9 @@ class SerialRun:
         return None
 
     def ending(self) -> NoWinner | None:
-        """None when the run ends with a winner or the trusted input standing; else why not."""
+        """None for a completed search with a winner or trusted input, never a failed search."""
         if self.eligible():
-            return None
+            return None if self.failure is None else NoWinner(reason=self.failure)
         trusted = candidates.trusted(self.baseline)
         if trusted and self.failure is None:
             return None

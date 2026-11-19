@@ -33,6 +33,11 @@ dependency direction. The design behind this contract, and the vocabulary (decis
 attempt, settlement, operation, adoption, suspension), is in
 [Running single, multi, evolve and issue_queue on the vs-core lifecycle](../design/strategies-on-core.md).
 
+The serial searches (`single`, `multi`) report a required design or attribution failure
+even when an earlier candidate passed its gates. An eligible incumbent does not turn an
+incomplete failed search into a successful adoption. Shared policy and replay stories in
+`tests/vibesys/serial_search/` enforce this precedence.
+
 ## Plugin declaration
 
 An `OrchestrationPlugin` is the complete declaration of one policy:
