@@ -36,6 +36,18 @@ reasoning 加回；bridge 必须先减去这个子集，避免重复计数。
 v3 旧实验保留原始事件，并在其独立 operator 投影中减去一次额外 fold，
 不能将旧框架 output 总数直接冒充官方 CLI 输出总数。
 
+中断恢复使用 agentshim `0.18.4+vibesys5`
+（`ac9b5bfda789f88d48b27eedbc2c650ab48e3478`）：
+bridge在调用过程中持久保存已观察用量和原始证据，不再只在正常退出后写checkpoint。
+operator镜像中的bridge与宿主安装的agentshim parser必须一同更新并分别记录pin。
+恢复只能使用同会话、有真实计数及明确边界的checkpoint；
+缺失、旧格式或无法解释的计数仍显式失败，禁止用空字典重置累计基线。
+`increment_known=False`可以带真实partial计数，不代表可靠零或完整费用；
+框架中性逐turn总量仍标未知，operator可将持久证据单列为下界，不估算缺口。
+容器HOME不是永久归档：运行容器删除后不能保证内部raw证据仍可读，
+不能仅因写过checkpoint就宣称实验已完整封账。
+此修复不扩大角色或CLI时限、不重开已终态run，也不免除失败尝试费用。
+
 ## 外层监控
 
 ```bash

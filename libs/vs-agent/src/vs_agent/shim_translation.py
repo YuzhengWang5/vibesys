@@ -105,7 +105,7 @@ def usage_from(
     field means the same thing everywhere.
     """
     if not usage.increment_known:
-        # Unknown resumed totals are zero placeholders, not measured increments.
+        # Partial evidence is not a settled per-turn increment.
         # Duration belongs to this invocation and is independent of its tokens.
         return AgentUsage(duration_ms=duration_ms)
     tokens = usage.tokens
