@@ -41,7 +41,7 @@ from vs_core.api import (
     Settlement,
     SettlementId,
 )
-from vs_core.api.search import Kept
+from vs_core.api.search import Kept, NoWinner
 from vs_runtime.api import CommandResult
 from vs_runtime.api.core import CaptureCommandOwner
 from vs_runtime.api.testing import FakeCommands, FakeWorkspace, FakeWorkspaces
@@ -234,6 +234,26 @@ def _played(drawn: list[tuple[bool, bool, float]]) -> SerialRun:
 
 
 _DRAWN = st.lists(st.tuples(st.booleans(), st.booleans(), st.floats(1, 1000)), max_size=6)
+
+
+@settings(max_examples=examples(pr=10, nightly=100))
+@given(drawn=_DRAWN, failure=st.text(min_size=1, max_size=80))
+def test_a_search_failure_is_not_hidden_by_an_earlier_eligible_candidate(
+    drawn: list[tuple[bool, bool, float]], failure: str
+) -> None:
+    run = _played([(True, True, 100.0), *drawn])
+    run.finished(
+        RoundDone(
+            number=run.counted + 1,
+            ledger=run.ledger,
+            counted=False,
+            failure=failure,
+        ),
+        None,
+    )
+
+    assert run.over(stopping=False)
+    assert run.ending() == NoWinner(reason=failure)
 
 
 @settings(max_examples=examples(pr=10, nightly=100))
